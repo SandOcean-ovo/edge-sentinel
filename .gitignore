@@ -1,0 +1,26 @@
+# 1. 编译中间产物
+build/
+*.o
+*.d
+*.out
+*.elf
+*.bin
+*.map
+
+# 2. 编辑器和系统临时文件
+.vscode/
+.idea/
+.DS_Store
+*~
+*.swp
+
+# 3. 日志文件和临时数据
+*.log
+data.db
+
+# 4. STM32 相关 (CubeMX/Keil 产生的非必要文件)
+stm32_f411_fw/Debug/
+stm32_f411_fw/Release/
+stm32_f411_fw/bin/
+stm32_f411_fw/*.uvgui.*
+stm32_f411_fw/*.bak
