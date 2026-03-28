@@ -19,8 +19,8 @@ build/
 data.db
 
 # 4. STM32 相关 (CubeMX/Keil 产生的非必要文件)
-stm32_f411_fw/Debug/
-stm32_f411_fw/Release/
-stm32_f411_fw/bin/
-stm32_f411_fw/*.uvgui.*
-stm32_f411_fw/*.bak
+stm32_f411_fw/edge_node_f411/Debug/
+stm32_f411_fw/edge_node_f411/Release/
+stm32_f411_fw/edge_node_f411/bin/
+stm32_f411_fw/edge_node_f411/*.uvgui.*
+stm32_f411_fw/edge_node_f411/*.bak

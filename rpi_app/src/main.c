@@ -14,7 +14,7 @@ int main(int argc, char **argv)
     while ((opt = getopt(argc, argv, "c:h")) != -1) {
         switch (opt) {
             case 'c':
-                conf_path = optarg; // 如果传了 -c，就用用户指定的路径
+                conf_path = optarg; // 如果传了 -c，就用用户指定的路径 这是getopt运行后更新的外部变量，直接用即可
                 break;
             case 'h':
                 printf("Usage: %s [-c config_file_path]\n", argv[0]);
