@@ -1,0 +1,35 @@
+# CMake build directory
+build/
+cmake-build-*/
+
+# CubeMX scratch files
+mx.scratch
+
+# Keep .settings for CubeMX
+!.settings/
+
+# MDK-ARM (Keil) build outputs
+MDK-ARM/DebugConfig/
+MDK-ARM/RTE/
+MDK-ARM/*/
+*.uvguix.*
+*.lst
+
+# Object files and libraries
+*.o
+*.a
+*.so
+*.elf
+*.bin
+*.hex
+*.map
+
+# Debug files
+*.dSYM/
+*.su
+*.d
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo

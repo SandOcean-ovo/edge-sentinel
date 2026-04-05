@@ -21,12 +21,17 @@
 #include "cmsis_os.h"
 #include "dma.h"
 #include "spi.h"
+#include "stm32f4xx_hal.h"
+#include "stm32f4xx_hal_gpio.h"
 #include "usart.h"
 #include "gpio.h"
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-
+#include "icm42688.h"
+#include <string.h>
+#include <stdio.h>
+#include <stdarg.h>
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -59,7 +64,15 @@ void MX_FREERTOS_Init(void);
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
-
+void My_print(const char *fmt, ...)
+{
+    char buf[128];
+    va_list args;
+    va_start(args, fmt);
+    int len = vsnprintf(buf, sizeof(buf), fmt, args);
+    va_end(args);
+    HAL_UART_Transmit(&huart1, (uint8_t*)buf, len, 1000);
+}
 /* USER CODE END 0 */
 
 /**
@@ -95,6 +108,9 @@ int main(void)
   MX_USART1_UART_Init();
   MX_SPI1_Init();
   /* USER CODE BEGIN 2 */
+  HAL_GPIO_WritePin(MCU_ALARM_OUT_GPIO_Port, MCU_ALARM_OUT_Pin, GPIO_PIN_SET);
+  ICM_Init();
+  Gyro_Calibration();
 
   /* USER CODE END 2 */
 
