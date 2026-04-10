@@ -1,42 +1,61 @@
 # 编译器和编译选项
 CC = gcc
-CFLAGS = -Wall -g -Iinclude
+CFLAGS = -Wall -O2 -g -Iinclude
+# 如果你的测试文件在 tests 目录，需要加上这个包含路径
+CFLAGS += -I. 
 
-# 目录规划 (不要写死在规则里，用变量管理)
+# 目录规划
 SRC_DIR = src
 BUILD_DIR = build
+TEST_DIR = tests
 
-# 最终目标程序的名字
+# 最终目标程序和测试程序的名字
 TARGET = $(BUILD_DIR)/edge_gatewayd
+TEST_TARGET = $(BUILD_DIR)/test_suite
 
-# 1. 自动获取所有的 .c 文件 
+# 1. 获取所有的源码文件
 SRCS = $(wildcard $(SRC_DIR)/*.c)
+# 2. 确定哪个是应用的主入口 (main.c)
+APP_MAIN_SRC = $(SRC_DIR)/main.c
+# 3. 提取出所有的“库逻辑”文件（即排除掉 main.c 的剩余文件）
+LIB_SRCS = $(filter-out $(APP_MAIN_SRC), $(SRCS))
+LIB_OBJS = $(patsubst $(SRC_DIR)/%.c, $(BUILD_DIR)/%.o, $(LIB_SRCS))
 
-# 2. 神奇的替换函数：把 src/xxx.c 替换成 build/xxx.o 
-# 这样你的 OBJS 就变成了 build/main.o build/conf.o，而不是 src 里的了！
-OBJS = $(patsubst $(SRC_DIR)/%.c, $(BUILD_DIR)/%.o, $(SRCS))
+# 4. 获取测试文件
+TEST_SRCS = $(wildcard $(TEST_DIR)/*.c)
+TEST_OBJS = $(patsubst $(TEST_DIR)/%.c, $(BUILD_DIR)/%.o, $(TEST_SRCS))
 
 # --- 规则部分 ---
 
-# 默认目标：先创建 build 目录，再生成可执行文件
 all: $(BUILD_DIR) $(TARGET)
 
-# 创建 build 目录 (-p 保证目录已存在时不会报错)
+# 生成应用主程序：链接 库逻辑 + 应用主入口
+$(TARGET): $(LIB_OBJS) $(patsubst $(SRC_DIR)/%.c, $(BUILD_DIR)/%.o, $(APP_MAIN_SRC))
+	$(CC) $^ -o $(TARGET)
+	@echo "Build app success!"
+
+# 生成测试程序：链接 库逻辑 + 测试主入口 (不包含应用主入口)
+test: $(BUILD_DIR) $(TEST_TARGET)
+	@echo "Running tests..."
+	./$(TEST_TARGET)
+
+$(TEST_TARGET): $(LIB_OBJS) $(TEST_OBJS)
+	$(CC) $^ -o $(TEST_TARGET)
+	@echo "Build test success!"
+
+# 创建目录
 $(BUILD_DIR):
 	mkdir -p $(BUILD_DIR)
 
-# 链接规则：依赖所有的 build/xxx.o，生成最终的 target
-$(TARGET): $(OBJS)
-	$(CC) $(OBJS) -o $(TARGET)
-	@echo "Build success! Run with: ./$(TARGET)"
-
-# 核心魔法：编译规则
-# 意思是：要生成 build/xxx.o，请寻找对应的 src/xxx.c
+# 编译 src 目录下的 .c
 $(BUILD_DIR)/%.o: $(SRC_DIR)/%.c
 	$(CC) $(CFLAGS) -c $< -o $@
 
-# 清理规则：直接把整个 build 文件夹干掉就行了，清清爽爽
+# 编译 tests 目录下的 .c
+$(BUILD_DIR)/%.o: $(TEST_DIR)/%.c
+	$(CC) $(CFLAGS) -c $< -o $@
+
 clean:
 	rm -rf $(BUILD_DIR)
 
-.PHONY: all clean
+.PHONY: all clean test

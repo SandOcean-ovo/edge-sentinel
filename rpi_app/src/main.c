@@ -1,6 +1,8 @@
 #include <unistd.h>
 #include "conf.h"
 #include "log.h"
+#include "crc16.h"
+#include "ringbuf.h"
 
 #define DEFAULT_CONF_PATH "/etc/edge_gateway/gateway.conf"
 
@@ -28,7 +30,7 @@ int main(int argc, char **argv)
     printf("Starting Edge Gateway...\n");
     printf("Using config file: %s\n", conf_path);
 
-
+    
     GatewayConfig_t config = {0};
     if (load_config(conf_path, &config) != 0) {
         // 如果读取失败，程序必须退出，不能带着错误的配置跑
@@ -41,6 +43,7 @@ int main(int argc, char **argv)
     edge_log(LOG_INFO, "Gateway started! Baudrate: %d", config.baudrate);
 
     log_deinit();
+
 
     return 0;
 }
