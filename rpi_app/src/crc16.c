@@ -38,13 +38,13 @@ const uint8_t TblCRCLo[] = {
     0x00, 0xC1, 0x81, 0x40, 0x01, 0xC0, 0x80, 0x41, 0x01, 0xC0, 0x80, 0x41, 0x00, 0xC1, 0x81, 0x40,
 };
 
-uint16_t crc_calculate(uint8_t* pdata, uint8_t len)
+uint16_t crc_calculate(uint8_t *pdata, uint8_t len)
 {
     uint8_t CRCHi = 0xFF;
     uint8_t CRCLo = 0xFF;
     uint8_t i;
 
-    while(len--)
+    while (len--)
     {
         i = CRCLo ^ *pdata++;
         CRCLo = CRCHi ^ TblCRCLo[i];
