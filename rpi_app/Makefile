@@ -1,6 +1,7 @@
 # 编译器和编译选项
 CC = gcc
 CFLAGS = -Wall -O2 -g -Iinclude
+LIBS = -lsqlite3
 # 如果你的测试文件在 tests 目录，需要加上这个包含路径
 CFLAGS += -I. 
 
@@ -31,7 +32,7 @@ all: $(BUILD_DIR) $(TARGET)
 
 # 生成应用主程序：链接 库逻辑 + 应用主入口
 $(TARGET): $(LIB_OBJS) $(patsubst $(SRC_DIR)/%.c, $(BUILD_DIR)/%.o, $(APP_MAIN_SRC))
-	$(CC) $^ -o $(TARGET)
+	$(CC) $^ -o $(TARGET) $(LIBS)
 	@echo "Build app success!"
 
 # 生成测试程序：链接 库逻辑 + 测试主入口 (不包含应用主入口)
@@ -40,7 +41,7 @@ test: $(BUILD_DIR) $(TEST_TARGET)
 	./$(TEST_TARGET)
 
 $(TEST_TARGET): $(LIB_OBJS) $(TEST_OBJS)
-	$(CC) $^ -o $(TEST_TARGET)
+	$(CC) $^ -o $(TEST_TARGET) $(LIBS)
 	@echo "Build test success!"
 
 # 创建目录

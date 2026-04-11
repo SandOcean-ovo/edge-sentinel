@@ -52,11 +52,11 @@ void handle_frame(SentinelFrame_t *pframe)
         edge_log(LOG_INFO, "Receive a heartbeat");
         break;
     case 0x02:
-        edge_log(LOG_INFO, "Receive IMU data: accel_peak = %2f, "
-                                             "accel_rms = %2f, "
-                                             "gyro_mean_x = %2f, "
-                                             "gyro_mean_y = %2f, "
-                                             "gyro_mean_z = %2f", 
+        edge_log(LOG_INFO, "Receive IMU data: accel_peak = %.2f, "
+                                             "accel_rms = %.2f, "
+                                             "gyro_mean_x = %.2f, "
+                                             "gyro_mean_y = %.2f, "
+                                             "gyro_mean_z = %.2f", 
                                              pframe->data.imu.accel_peak, 
                                              pframe->data.imu.accel_rms, 
                                              pframe->data.imu.gyro_mean_x, 
@@ -64,11 +64,36 @@ void handle_frame(SentinelFrame_t *pframe)
                                              pframe->data.imu.gyro_mean_z
                                             );
         break;
-    
+
     case 0x04:
+        char* alarm_type;
+        if(pframe->data.alarm.alarm_type == 0x01)
+        {
+            alarm_type = "ALARM_TYPE_BUTTON";
+        }
+        else if (pframe->data.alarm.alarm_type == 0x02)
+        {
+            alarm_type = "ALARM_TYPE_PEAK";
+        }
+        else if (pframe->data.alarm.alarm_type == 0x04)
+        {
+            alarm_type = "ALARM_TYPE_RMS";
+        }
+        else if (pframe->data.alarm.alarm_type == 0x08)
+        {
+            alarm_type = "ALARM_TYPE_RMS";
+        }
+        else
+        {
+            alarm_type = "INVALID";
+        }
+        
+        edge_log(LOG_WARN, "Alarm received! alarm_type = %s, timestamp on MCU = %d", alarm_type, pframe->data.alarm.timestamp);
         break;
+
     
     default:
+        printf("invalid type received! type:%d", pframe->type);
         break;
     }
 }

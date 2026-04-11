@@ -9,7 +9,7 @@
 #define MIN_PACKAGE_SIZE 6
 
 // 1. IMU 数据结构
-typedef struct
+typedef struct __attribute__((packed))
 {
     float accel_peak;  // 加速度峰值 (g)
     float accel_rms;   // 加速度RMS (g)
@@ -19,7 +19,7 @@ typedef struct
 } IMUData_t;
 
 // 2. 告警数据结构
-typedef struct
+typedef struct __attribute__((packed))
 {
     uint8_t alarm_type;
     uint32_t timestamp;
