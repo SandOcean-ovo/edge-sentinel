@@ -87,9 +87,9 @@ uint16_t Protocol_PackFrame(uint8_t type, uint8_t *payload, uint8_t payload_len,
     // 计算CRC16 (对 SOF + Len + Type + Payload)
     uint16_t crc = Protocol_CalcCRC16(out_buf, index);
 
-    // CRC16 (大端序)
-    out_buf[index++] = (crc >> 8) & 0xFF;
+    // CRC16 (小端序)
     out_buf[index++] = crc & 0xFF;
+    out_buf[index++] = (crc >> 8) & 0xFF;
 
     return index;
 }
@@ -111,9 +111,8 @@ void Protocol_SendHeartbeat(void)
  * @param gx 角速度X均值
  * @param gy 角速度Y均值
  * @param gz 角速度Z均值
- * @param alarm 报警标志
  */
-void Protocol_SendIMUFeature(float peak, float rms, float gx, float gy, float gz, uint8_t alarm)
+void Protocol_SendIMUFeature(float peak, float rms, float gx, float gy, float gz)
 {
     static uint8_t tx_buf[PROTOCOL_HEADER_SIZE + sizeof(IMU_Feature_Payload_t) + PROTOCOL_CRC_SIZE];
     IMU_Feature_Payload_t payload;
@@ -122,7 +121,6 @@ void Protocol_SendIMUFeature(float peak, float rms, float gx, float gy, float gz
     payload.gyro_mean_x = gx;
     payload.gyro_mean_y = gy;
     payload.gyro_mean_z = gz;
-    payload.alarm_flag = alarm;
 
     uint16_t len = Protocol_PackFrame(MSG_TYPE_IMU_FEATURE, (uint8_t*)&payload, sizeof(payload), tx_buf);
     HAL_UART_Transmit_DMA(&huart1, tx_buf, len);

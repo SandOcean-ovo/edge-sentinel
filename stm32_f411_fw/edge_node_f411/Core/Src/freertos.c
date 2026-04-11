@@ -233,8 +233,7 @@ void StartTaskIMU(void *argument)
 
       // 发送IMU特征数据到树莓派
       Protocol_SendIMUFeature(stats.accel_peak, stats.accel_rms,
-                              stats.gyro_mean_x, stats.gyro_mean_y, stats.gyro_mean_z,
-                              stats.alarm_flag);
+                              stats.gyro_mean_x, stats.gyro_mean_y, stats.gyro_mean_z);
 
       // 如果有阈值超限，发送到告警队列
       if (stats.alarm_flag)

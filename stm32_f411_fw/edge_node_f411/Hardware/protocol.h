@@ -37,7 +37,6 @@ typedef struct {
     float gyro_mean_x;     // 角速度X均值 (deg/s)
     float gyro_mean_y;     // 角速度Y均值 (deg/s)
     float gyro_mean_z;     // 角速度Z均值 (deg/s)
-    uint8_t alarm_flag;    // 报警标志
 } __attribute__((packed)) IMU_Feature_Payload_t;
 
 /* 告警数据结构 */
@@ -51,7 +50,7 @@ void Protocol_Init(void);
 uint16_t Protocol_CalcCRC16(uint8_t *data, uint16_t len);
 uint16_t Protocol_PackFrame(uint8_t type, uint8_t *payload, uint8_t payload_len, uint8_t *out_buf);
 void Protocol_SendHeartbeat(void);
-void Protocol_SendIMUFeature(float peak, float rms, float gx, float gy, float gz, uint8_t alarm);
+void Protocol_SendIMUFeature(float peak, float rms, float gx, float gy, float gz);
 void Protocol_SendAlarm(uint8_t alarm_type);
 int8_t Protocol_ParseFrame(uint8_t *data, uint16_t len, Protocol_Frame_t *frame);
 void Protocol_UART_IdleCallback(void);
