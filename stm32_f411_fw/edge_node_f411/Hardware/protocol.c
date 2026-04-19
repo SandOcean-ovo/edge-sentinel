@@ -95,13 +95,25 @@ uint16_t Protocol_PackFrame(uint8_t type, uint8_t *payload, uint8_t payload_len,
 }
 
 /**
+ * @brief 等待UART DMA发送完成后再发送
+ * @param pData 数据指针
+ * @param Size 数据长度
+ */
+static void Protocol_TransmitDMA(uint8_t *pData, uint16_t Size)
+{
+    // 等待上一次DMA发送完成
+    while (huart1.gState != HAL_UART_STATE_READY) {}
+    HAL_UART_Transmit_DMA(&huart1, pData, Size);
+}
+
+/**
  * @brief 发送心跳包
  */
 void Protocol_SendHeartbeat(void)
 {
     static uint8_t tx_buf[PROTOCOL_HEADER_SIZE + PROTOCOL_CRC_SIZE];
     uint16_t len = Protocol_PackFrame(MSG_TYPE_HEARTBEAT, NULL, 0, tx_buf);
-    HAL_UART_Transmit_DMA(&huart1, tx_buf, len);
+    Protocol_TransmitDMA(tx_buf, len);
 }
 
 /**
@@ -123,7 +135,7 @@ void Protocol_SendIMUFeature(float peak, float rms, float gx, float gy, float gz
     payload.gyro_mean_z = gz;
 
     uint16_t len = Protocol_PackFrame(MSG_TYPE_IMU_FEATURE, (uint8_t*)&payload, sizeof(payload), tx_buf);
-    HAL_UART_Transmit_DMA(&huart1, tx_buf, len);
+    Protocol_TransmitDMA(tx_buf, len);
 }
 
 /**
@@ -138,7 +150,7 @@ void Protocol_SendAlarm(uint8_t alarm_type)
     payload.timestamp = HAL_GetTick();
 
     uint16_t len = Protocol_PackFrame(MSG_TYPE_ALARM, (uint8_t*)&payload, sizeof(payload), tx_buf);
-    HAL_UART_Transmit_DMA(&huart1, tx_buf, len);
+    Protocol_TransmitDMA(tx_buf, len);
 }
 
 /**

@@ -21,8 +21,6 @@
 #include "cmsis_os.h"
 #include "dma.h"
 #include "spi.h"
-#include "stm32f4xx_hal.h"
-#include "stm32f4xx_hal_gpio.h"
 #include "usart.h"
 #include "gpio.h"
 
@@ -111,6 +109,9 @@ int main(void)
   HAL_GPIO_WritePin(MCU_ALARM_OUT_GPIO_Port, MCU_ALARM_OUT_Pin, GPIO_PIN_SET);
   ICM_Init();
   Gyro_Calibration();
+  HAL_Delay(5);
+  // 使能IMU INT1 Data Ready中断
+  ICM_EnableDataReadyInt();
 
   /* USER CODE END 2 */
 

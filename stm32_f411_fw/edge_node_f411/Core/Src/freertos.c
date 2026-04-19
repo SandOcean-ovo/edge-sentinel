@@ -67,6 +67,23 @@ typedef struct {
 extern float gyro_bias_x;
 extern float gyro_bias_y;
 extern float gyro_bias_z;
+
+osSemaphoreId_t imuDataReadySemHandle;       // IMU数据就绪信号量
+volatile uint8_t imu_data_available = 0;     // 1秒内是否收到过IMU数据
+
+// Alarm任务相关（放在USER CODE区避免CubeMX覆盖）
+osThreadId_t Task_AlarmHandle;
+const osThreadAttr_t Task_Alarm_attributes = {
+  .name = "Task_Alarm",
+  .stack_size = 256 * 4,
+  .priority = (osPriority_t) osPriorityAboveNormal,
+};
+
+// 消息队列
+osMessageQueueId_t AlarmQueueHandle;
+const osMessageQueueAttr_t AlarmQueue_attributes = { .name = "AlarmQueue" };
+osMessageQueueId_t RxDataQueueHandle;
+const osMessageQueueAttr_t RxDataQueue_attributes = { .name = "RxDataQueue" };
 /* USER CODE END Variables */
 /* Definitions for Task_Heartbeat */
 osThreadId_t Task_HeartbeatHandle;
@@ -79,7 +96,7 @@ const osThreadAttr_t Task_Heartbeat_attributes = {
 osThreadId_t Task_IMUHandle;
 const osThreadAttr_t Task_IMU_attributes = {
   .name = "Task_IMU",
-  .stack_size = 512 * 4,
+  .stack_size = 256 * 4,
   .priority = (osPriority_t) osPriorityHigh,
 };
 /* Definitions for Task_Protocol */
@@ -89,35 +106,16 @@ const osThreadAttr_t Task_Protocol_attributes = {
   .stack_size = 256 * 4,
   .priority = (osPriority_t) osPriorityAboveNormal,
 };
-/* Definitions for Task_Alarm */
-osThreadId_t Task_AlarmHandle;
-const osThreadAttr_t Task_Alarm_attributes = {
-  .name = "Task_Alarm",
-  .stack_size = 256 * 4,
-  .priority = (osPriority_t) osPriorityHigh,
-};
-
-/* Definitions for AlarmQueue */
-osMessageQueueId_t AlarmQueueHandle;
-const osMessageQueueAttr_t AlarmQueue_attributes = {
-  .name = "AlarmQueue"
-};
-
-/* Definitions for RxDataQueue */
-osMessageQueueId_t RxDataQueueHandle;
-const osMessageQueueAttr_t RxDataQueue_attributes = {
-  .name = "RxDataQueue"
-};
 
 /* Private function prototypes -----------------------------------------------*/
 /* USER CODE BEGIN FunctionPrototypes */
 void My_print(const char* format, ...);
+void StartTaskAlarm(void *argument);
 /* USER CODE END FunctionPrototypes */
 
 void StartDefaultTask(void *argument);
 void StartTaskIMU(void *argument);
 void StartTaskProtocol(void *argument);
-void StartTaskAlarm(void *argument);
 
 void MX_FREERTOS_Init(void); /* (MISRA C 2004 rule 8.1) */
 
@@ -137,6 +135,7 @@ void MX_FREERTOS_Init(void) {
 
   /* USER CODE BEGIN RTOS_SEMAPHORES */
   /* add semaphores, ... */
+  imuDataReadySemHandle = osSemaphoreNew(1, 0, NULL);
   /* USER CODE END RTOS_SEMAPHORES */
 
   /* USER CODE BEGIN RTOS_TIMERS */
@@ -184,8 +183,16 @@ void StartDefaultTask(void *argument)
   /* Infinite loop */
   for(;;)
   {
-    HAL_GPIO_TogglePin(MCU_LED_GPIO_Port, MCU_LED_Pin);
+    // 先清标志，再等1秒，看这1秒内IMU有没有发过特征包
+    imu_data_available = 0;
     osDelay(1000);
+    HAL_GPIO_TogglePin(MCU_LED_GPIO_Port, MCU_LED_Pin);
+
+    if (!imu_data_available)
+    {
+      // 这1秒内没收到IMU数据，发空心跳包兜底
+      Protocol_SendHeartbeat();
+    }
   }
   /* USER CODE END StartDefaultTask */
 }
@@ -211,50 +218,55 @@ void StartTaskIMU(void *argument)
   /* Infinite loop */
   for(;;)
   {
-    // 读取 IMU 数据
-    ICM_ReadTempData(&imu_data);
-
-    // 转换为物理单位
-    float ax = imu_data.accel_x / 2048.0f;  // ±16g 量程
-    float ay = imu_data.accel_y / 2048.0f;
-    float az = imu_data.accel_z / 2048.0f;
-    float gx = (imu_data.gyro_x / 16.4f) - (gyro_bias_x / 0.0174533f);  // ±2000dps 量程，去零漂
-    float gy = (imu_data.gyro_y / 16.4f) - (gyro_bias_y / 0.0174533f);
-    float gz = (imu_data.gyro_z / 16.4f) - (gyro_bias_z / 0.0174533f);
-
-    // 添加样本
-    VibMonitor_AddSample(ax, ay, az, gx, gy, gz);
-    sample_count++;
-
-    // 每秒输出一次统计结果
-    if (sample_count >= SAMPLES_PER_SECOND)
+    // 等待IMU数据就绪信号量（超时50ms）
+    if (osSemaphoreAcquire(imuDataReadySemHandle, 50) == osOK)
     {
-      VibMonitor_Calculate(&stats);
+      // 读取 IMU 数据
+      ICM_ReadTempData(&imu_data);
 
-      // 发送IMU特征数据到树莓派
-      Protocol_SendIMUFeature(stats.accel_peak, stats.accel_rms,
-                              stats.gyro_mean_x, stats.gyro_mean_y, stats.gyro_mean_z);
+      // SPI通信成功，标记IMU链路正常
+      imu_data_available = 1;
 
-      // 如果有阈值超限，发送到告警队列
-      if (stats.alarm_flag)
+      // 转换为物理单位
+      float ax = imu_data.accel_x / 2048.0f;  // ±16g 量程
+      float ay = imu_data.accel_y / 2048.0f;
+      float az = imu_data.accel_z / 2048.0f;
+      float gx = (imu_data.gyro_x / 16.4f) - (gyro_bias_x / 0.0174533f);
+      float gy = (imu_data.gyro_y / 16.4f) - (gyro_bias_y / 0.0174533f);
+      float gz = (imu_data.gyro_z / 16.4f) - (gyro_bias_z / 0.0174533f);
+
+      // 添加样本
+      VibMonitor_AddSample(ax, ay, az, gx, gy, gz);
+      sample_count++;
+
+      // 每秒输出一次统计结果
+      if (sample_count >= SAMPLES_PER_SECOND)
       {
-        AlarmEvent_t alarm_event;
-        alarm_event.alarm_type = stats.alarm_flag << 1;  // 0x02=峰值, 0x04=RMS, 0x08=角速度
-        alarm_event.peak = stats.accel_peak;
-        alarm_event.rms = stats.accel_rms;
-        alarm_event.gyro_x = stats.gyro_mean_x;
-        alarm_event.gyro_y = stats.gyro_mean_y;
-        alarm_event.gyro_z = stats.gyro_mean_z;
-        osMessageQueuePut(AlarmQueueHandle, &alarm_event, 0, 0);
+        VibMonitor_Calculate(&stats);
+
+        // 发送IMU特征数据到树莓派
+        Protocol_SendIMUFeature(stats.accel_peak, stats.accel_rms,
+                                stats.gyro_mean_x, stats.gyro_mean_y, stats.gyro_mean_z);
+
+        // 如果有阈值超限，发送告警到队列（位掩码，上层解析）
+        if (stats.alarm_flag)
+        {
+          AlarmEvent_t alarm_event;
+          alarm_event.alarm_type = stats.alarm_flag << 1;
+          alarm_event.peak = stats.accel_peak;
+          alarm_event.rms = stats.accel_rms;
+          alarm_event.gyro_x = stats.gyro_mean_x;
+          alarm_event.gyro_y = stats.gyro_mean_y;
+          alarm_event.gyro_z = stats.gyro_mean_z;
+          osMessageQueuePut(AlarmQueueHandle, &alarm_event, 0, 0);
+        }
+
+        // 重置缓冲区
+        VibMonitor_Reset();
+        sample_count = 0;
       }
-
-      // 重置缓冲区
-      VibMonitor_Reset();
-      sample_count = 0;
     }
-
-    // 10ms 采样间隔
-    osDelay(SAMPLE_INTERVAL_MS);
+    // 超时则不做处理，等待下一次信号量
   }
   /* USER CODE END StartTaskIMU */
 }
@@ -314,77 +326,52 @@ void StartTaskProtocol(void *argument)
   /* USER CODE END StartTaskProtocol */
 }
 
-/* USER CODE BEGIN Header_StartTaskAlarm */
-/**
-* @brief Function implementing the Task_Alarm thread.
-* @param argument: Not used
-* @retval None
-*/
-/* USER CODE END Header_StartTaskAlarm */
-void StartTaskAlarm(void *argument)
-{
-  /* USER CODE BEGIN StartTaskAlarm */
-  AlarmEvent_t alarm_event;
-  uint8_t button_triggered = 0;
-  uint32_t irq_end_tick = 0;  // 中断引脚拉低时刻
-
-  // 初始化报警模块
-  Alarm_Init();
-
-  /* Infinite loop */
-  for(;;)
-  {
-    // 检测按键（每20ms检测一次，消抖）
-    if (Alarm_CheckButton() && !button_triggered)
-    {
-      button_triggered = 1;
-
-      // 构造按键报警事件
-      alarm_event.alarm_type = ALARM_TYPE_BUTTON;
-      alarm_event.peak = 0;
-      alarm_event.rms = 0;
-      alarm_event.gyro_x = 0;
-      alarm_event.gyro_y = 0;
-      alarm_event.gyro_z = 0;
-
-      // 拉高中断引脚通知树莓派
-      Alarm_TriggerIRQ();
-      irq_end_tick = osKernelGetTickCount() + ALARM_IRQ_DURATION_MS;
-
-      // 发送告警消息
-      Protocol_SendAlarm(ALARM_TYPE_BUTTON);
-    }
-    else if (!Alarm_CheckButton())
-    {
-      button_triggered = 0;
-    }
-
-    // 检查告警队列（来自IMU任务的阈值超限）
-    if (osMessageQueueGet(AlarmQueueHandle, &alarm_event, NULL, 0) == osOK)
-    {
-      // 拉高中断引脚通知树莓派
-      Alarm_TriggerIRQ();
-      irq_end_tick = osKernelGetTickCount() + ALARM_IRQ_DURATION_MS;
-
-      // 发送告警消息
-      Protocol_SendAlarm(alarm_event.alarm_type);
-    }
-
-    // 检查是否需要拉低中断引脚
-    if (irq_end_tick > 0 && osKernelGetTickCount() >= irq_end_tick)
-    {
-      Alarm_SetIRQ(0);  // 拉低
-      irq_end_tick = 0;
-    }
-
-    // 20ms 周期
-    osDelay(20);
-  }
-  /* USER CODE END StartTaskAlarm */
-}
-
 /* Private application code --------------------------------------------------*/
 /* USER CODE BEGIN Application */
+void StartTaskAlarm(void *argument)
+{
+  AlarmEvent_t alarm_event;
+  uint32_t irq_off_tick = 0;  // 告警引脚自动拉低的时刻
 
+  for(;;)
+  {
+    // 自动拉低告警引脚（非阻塞）
+    if (irq_off_tick && HAL_GetTick() >= irq_off_tick)
+    {
+      Alarm_SetIRQ(0);
+      irq_off_tick = 0;
+    }
+
+    // 检查按键报警
+    if (Alarm_CheckButton())
+    {
+      osDelay(20);  // 消抖
+      if (Alarm_CheckButton())
+      {
+        Alarm_SetIRQ(1);
+        irq_off_tick = HAL_GetTick() + ALARM_IRQ_DURATION_MS;
+        Protocol_SendAlarm(ALARM_TYPE_BUTTON);
+        // 等待按键释放
+        while (Alarm_CheckButton()) { osDelay(10); }
+      }
+    }
+
+    // 检查IMU超限告警（非阻塞，超时10ms）
+    if (osMessageQueueGet(AlarmQueueHandle, &alarm_event, NULL, 10) == osOK)
+    {
+      Alarm_SetIRQ(1);
+      irq_off_tick = HAL_GetTick() + ALARM_IRQ_DURATION_MS;
+      Protocol_SendAlarm(alarm_event.alarm_type);
+    }
+  }
+}
+
+void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
+{
+  if (GPIO_Pin == IMU_INT_Pin)
+  {
+    osSemaphoreRelease(imuDataReadySemHandle);
+  }
+}
 /* USER CODE END Application */
 

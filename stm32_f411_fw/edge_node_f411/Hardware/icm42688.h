@@ -18,8 +18,10 @@
 #define ICM_ACCEL_CONFIG0				0x50  // 加速度计配置0
 #define ICM_GYRO_CONFIG1				0x51  // 陀螺仪配置1
 #define ICM_GYRO_ACCEL_CONFIG0			0x52  // 陀螺仪和加速度计配置0
+#define ICM_INT_CONFIG              0x14  // INT引脚配置
 #define ICM_ACCEL_CONFIG1	        	0x53  // 加速度计配置1
 #define ICM_FIFO_CONFIG1          		0x5F  // FIFO配置1
+#define ICM_INT_SOURCE0             0x65  // 中断源0
 
 #define ICM_ID                    		0x47  // 设备ID
 
@@ -83,6 +85,7 @@ void ICM_ReadTempData(icm42688_data_t *data);
 void ICM_ReadFIFOData(icm42688_FIFO_data_t *data);
 void IMU_Data(float *filtered_rol, float *filtered_pit, float *filtered_yaw);
 void Gyro_Calibration(void); // 统一校准函数声明
+void ICM_EnableDataReadyInt(void); // 使能INT1 Data Ready中断
 
 
 

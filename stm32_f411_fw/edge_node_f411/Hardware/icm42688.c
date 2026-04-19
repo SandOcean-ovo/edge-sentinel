@@ -119,10 +119,12 @@ uint8_t ICM_Init(void)
   // [3:2]=11（陀螺仪 LN MODE），[1:0]=11（加速度计 LN MODE）
 	status = SPI1_ReadWriteBytes(ICM_PWR_MGMT0, ACCEL_GYRO_MODE, NULL, 1);
 	HAL_Delay(100);
-	status = SPI1_ReadWriteBytes(ICM_FIFO_CONFIG, Stream_FIFO, NULL, 1);
-	HAL_Delay(5);
-	status = SPI1_ReadWriteBytes(ICM_FIFO_CONFIG1, FIFO_EN, NULL, 1);
-	HAL_Delay(5);
+	// 配置加速度计: ±16g, 100Hz ODR (FS=011, ODR=1000)
+	status = SPI1_ReadWriteBytes(ICM_ACCEL_CONFIG0, 0x68, NULL, 1);
+	HAL_Delay(1);
+	// 配置陀螺仪: ±2000dps, 100Hz ODR (FS=000, ODR=1000)
+	status = SPI1_ReadWriteBytes(ICM_GYRO_CONFIG0, 0x08, NULL, 1);
+	HAL_Delay(1);
 	if(status != 0) return 1;
 	return 0;
 }
@@ -282,5 +284,20 @@ void IMU_Data(float *filtered_rol, float *filtered_pit, float *filtered_yaw)
     last_pit = *filtered_pit;
     last_yaw = *filtered_yaw;
     */
+}
+
+/**
+ * @brief 使能ICM42688 INT1引脚的Data Ready中断
+ * @details 配置INT1为推挽、高电平有效、脉冲模式，
+ *          并使能Data Ready中断输出到INT1
+ */
+void ICM_EnableDataReadyInt(void)
+{
+    // INT1: 推挽输出, 高电平有效, 脉冲模式
+    SPI1_ReadWriteBytes(ICM_INT_CONFIG, 0x02, NULL, 1);
+    HAL_Delay(1);
+    // 使能 Data Ready 中断到 INT1
+    SPI1_ReadWriteBytes(ICM_INT_SOURCE0, 0x08, NULL, 1);
+    HAL_Delay(1);
 }
 
