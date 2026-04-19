@@ -5,7 +5,7 @@
 #include <stdbool.h>
 #include <string.h>
 
-typedef struct
+typedef struct RingBuf_t
 {
     uint8_t *pdata;
     uint32_t size;

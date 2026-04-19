@@ -49,51 +49,53 @@ void handle_frame(SentinelFrame_t *pframe)
     switch (pframe->type)
     {
     case 0x01:
-        edge_log(LOG_INFO, "Receive a heartbeat");
+    {
+        edge_log(LOG_INFO, "Receive a heartbeat\n");
         break;
+    }
     case 0x02:
-        edge_log(LOG_INFO, "Receive IMU data: accel_peak = %.2f, "
-                                             "accel_rms = %.2f, "
-                                             "gyro_mean_x = %.2f, "
-                                             "gyro_mean_y = %.2f, "
-                                             "gyro_mean_z = %.2f", 
-                                             pframe->data.imu.accel_peak, 
-                                             pframe->data.imu.accel_rms, 
-                                             pframe->data.imu.gyro_mean_x, 
-                                             pframe->data.imu.gyro_mean_y, 
-                                             pframe->data.imu.gyro_mean_z
-                                            );
+    {
+        sensor_data_t record = {0};
+        record.accel_peak = pframe->data.imu.accel_peak;
+        record.accel_rms = pframe->data.imu.accel_rms;
+        record.gyro_mean_x = pframe->data.imu.gyro_mean_x;
+        record.gyro_mean_y = pframe->data.imu.gyro_mean_y;
+        record.gyro_mean_z = pframe->data.imu.gyro_mean_z;
+        record.timestamp = (uint32_t)time(NULL); // 从协议中获取 MCU 时间
+        if (db_save_sensor_record(&record) != 0)
+        {
+            edge_log(LOG_INFO, "Failed to save sensor record!");
+        }
         break;
-
+    }
     case 0x04:
-        char* alarm_type;
-        if(pframe->data.alarm.alarm_type == 0x01)
-        {
-            alarm_type = "ALARM_TYPE_BUTTON";
-        }
-        else if (pframe->data.alarm.alarm_type == 0x02)
-        {
-            alarm_type = "ALARM_TYPE_PEAK";
-        }
-        else if (pframe->data.alarm.alarm_type == 0x04)
-        {
-            alarm_type = "ALARM_TYPE_RMS";
-        }
-        else if (pframe->data.alarm.alarm_type == 0x08)
-        {
-            alarm_type = "ALARM_TYPE_RMS";
-        }
-        else
-        {
-            alarm_type = "INVALID";
-        }
-        
-        edge_log(LOG_WARN, "Alarm received! alarm_type = %s, timestamp on MCU = %d", alarm_type, pframe->data.alarm.timestamp);
-        break;
+    {
+        char alarm_desc[128] = {0};
+        uint8_t type = pframe->data.alarm.alarm_type;
 
-    
-    default:
-        printf("invalid type received! type:%d", pframe->type);
+        if (type & 0x01)
+            strcat(alarm_desc, "BUTTON ");
+        if (type & 0x02)
+            strcat(alarm_desc, "PEAK ");
+        if (type & 0x04)
+            strcat(alarm_desc, "RMS_X ");
+        if (type & 0x08)
+            strcat(alarm_desc, "RMS_Y ");
+        // 如果有更多位，继续添加判断...
+
+        if (alarm_desc[0] == '\0')
+        {
+            strcpy(alarm_desc, "NONE/UNKNOWN");
+        }
+
+        edge_log(LOG_WARN, "Alarm received! Flags: [ %s], MCU_Tick: %u",
+                 alarm_desc, pframe->data.alarm.timestamp);
         break;
+    }
+    default:
+    {
+        edge_log(LOG_INFO, "invalid type received! type:%d", pframe->type);
+        break;
+    }
     }
 }

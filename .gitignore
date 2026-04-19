@@ -16,4 +16,7 @@ build/
 
 # 3. 日志文件和临时数据
 *.log
-data.db
+*.db
+
+# 4. 外部库
+external/

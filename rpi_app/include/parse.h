@@ -5,11 +5,13 @@
 #include "ringbuf.h"
 #include "crc16.h"
 #include "log.h"
+#include "db.h"
+#include "protocol_utils.h"
 
 #define MIN_PACKAGE_SIZE 6
 
 // 1. IMU 数据结构
-typedef struct __attribute__((packed))
+typedef struct __attribute__((packed)) IMUData_t
 {
     float accel_peak;  // 加速度峰值 (g)
     float accel_rms;   // 加速度RMS (g)
@@ -19,14 +21,14 @@ typedef struct __attribute__((packed))
 } IMUData_t;
 
 // 2. 告警数据结构
-typedef struct __attribute__((packed))
+typedef struct __attribute__((packed)) AlarmData_t
 {
     uint8_t alarm_type;
     uint32_t timestamp;
 } AlarmData_t;
 
 // 3. 统一的协议对象
-typedef struct
+typedef struct SentinelFrame_t
 {
     uint8_t type;
     uint8_t len; // 纯载荷长度

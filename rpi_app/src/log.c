@@ -8,7 +8,7 @@ int log_init(const char* file_path)
     if(!g_log_fp)
     {
         perror("Cannot open log!");
-        return 1;
+        return -1;
     }
     return 0;
 }

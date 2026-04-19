@@ -5,7 +5,7 @@
 #include <stdarg.h>
 #include <time.h>
 
-typedef enum
+typedef enum Loglevel_t
 {
     LOG_INFO = 0,
     LOG_WARN = 1,

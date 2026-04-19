@@ -8,13 +8,16 @@
 
 #define STR_MAX_LEN 64
 
-typedef struct 
+typedef struct GatewayConfig_t
 {
     char device_id[STR_MAX_LEN]; /* 设备id */
     char uart_dev[STR_MAX_LEN];  /* 串口挂载 */
     int baudrate;                /* 串口波特率 */
     float temp_threshold;        /* 温度阈值 */
     char log_file[STR_MAX_LEN];  /* 日志路径 */
+    char db_path[STR_MAX_LEN];   /* 数据库路径 */
+    char ip[STR_MAX_LEN];
+    int port;
 } GatewayConfig_t;    
 
 /**
