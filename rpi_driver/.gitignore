@@ -1,0 +1,10 @@
+dts/*
+!edge-mcu-alarm.dts
+
+edge_alarm/*
+!edge_alarm/edge_alarm.c
+!edge_alarm/Makefile
+
+gateway_monitor/*
+!gateway_monitor/gateway_monitor.c
+!gateway_monitor/Makefile

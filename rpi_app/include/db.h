@@ -32,4 +32,7 @@ int db_get_unsent_records(sensor_data_t *out_list, int max_count);
 // 状态更新：数据成功发送到云端后，更新标记位
 int db_mark_as_sent(int id);
 
+// 清除旧数据
+int db_cleanup_old_data(int days);
+
 #endif

@@ -23,6 +23,26 @@ int net_client_init(const char *ip, int port)
         return -1;
     }
 
+    // 开启Keepalive
+    int keepalive = 1;
+    int keepidle = 10; // 10秒空闲后开始发探测包
+    int keepinterval = 3; // 探测包间隔3秒
+    int keepcount = 3; // 探测失败3次后认定连接断开
+    int keep_rc = 0;
+
+    keep_rc &= setsockopt(g_sockfd, SOL_SOCKET, SO_KEEPALIVE, &keepalive, sizeof(keepalive));
+    keep_rc &= setsockopt(g_sockfd, IPPROTO_TCP, TCP_KEEPIDLE, &keepidle, sizeof(keepidle));
+    keep_rc &= setsockopt(g_sockfd, IPPROTO_TCP, TCP_KEEPINTVL, &keepinterval, sizeof(keepinterval));
+    keep_rc &= setsockopt(g_sockfd, IPPROTO_TCP, TCP_KEEPCNT, &keepcount, sizeof(keepcount));
+
+    if (keep_rc < 0)
+    {
+        perror("setsockopt keepalive error");
+        close(g_sockfd);
+        g_sockfd = -1;
+        return -1;
+    }
+
     if (set_nonblocking(g_sockfd) < 0)
     {
         perror("set_nonblocking error");

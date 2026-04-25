@@ -2,7 +2,7 @@
 
 int uart_init(const char *device, int baud)
 {
-    // 1. 建议去掉 O_NDELAY，除非你后续明确需要非阻塞模式处理多路复用
+
     int fd = open(device, O_RDWR | O_NOCTTY | O_NDELAY);
     if (fd == -1)
         return -1;

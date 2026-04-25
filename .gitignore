@@ -10,6 +10,7 @@ build/
 # 2. 编辑器和系统临时文件
 .vscode/
 .idea/
+.cursor/
 .DS_Store
 *~
 *.swp
@@ -20,3 +21,5 @@ build/
 
 # 4. 外部库
 external/
+
+规划-final.md

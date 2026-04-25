@@ -9,6 +9,7 @@
 #include <errno.h>
 #include <sys/socket.h>
 #include <arpa/inet.h>
+#include <netinet/tcp.h>
 
 // 初始化：创建 socket, 设为非阻塞
 int net_client_init(const char *ip, int port);

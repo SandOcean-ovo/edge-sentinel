@@ -30,6 +30,7 @@ int db_init(const char *db_path)
         return -1;
     }
 
+    // WAL模式 分块合并，不直接操作主文件
     sqlite3_exec(g_db, "PRAGMA journal_mode = WAL;", NULL, NULL, NULL);
 
     edge_log(LOG_INFO, "Database initialized at %s", db_path);
@@ -62,7 +63,6 @@ int db_save_sensor_record(const sensor_data_t *data)
         sqlite3_finalize(stmt);
         return -1;
     }
-        
 
     sqlite3_bind_double(stmt, 1, (double)data->accel_peak);
     sqlite3_bind_double(stmt, 2, (double)data->accel_rms);
@@ -132,4 +132,29 @@ int db_mark_as_sent(int id)
 
     sqlite3_finalize(stmt);
     return rc == SQLITE_DONE ? 0 : -1;
+}
+
+int db_cleanup_old_data(int days)
+{
+    char sql[128];
+    snprintf(sql, sizeof(sql), "DELETE FROM sensor_data WHERE timestamp < strftime('%%s', 'now', '-%d days');", days);
+
+    char *err_msg = NULL;
+    if (sqlite3_exec(g_db, sql, NULL, NULL, &err_msg) != SQLITE_OK)
+    {
+        edge_log(LOG_ERROR, "SQL error during cleanup: %s", err_msg);
+        sqlite3_free(err_msg);
+        return -1;
+    }
+
+    const char *sql_create_index = "CREATE INDEX IF NOT EXISTS idx_timestamp ON sensor_logs(timestamp);";
+    sqlite3_exec(g_db, sql_create_index, NULL, NULL, &err_msg);
+    if (err_msg)
+    {
+        // 打印日志，但这里不认为是致命错误
+        edge_log(LOG_ERROR, "Failed to create index: %s", err_msg);
+        sqlite3_free(err_msg);
+    }
+
+    return 0;
 }

@@ -1,0 +1,55 @@
+// 引入必要的宏定义头文件（注意：编译时需要用 cpp 预处理）
+
+/dts-v1/;
+/plugin/;
+
+/ {
+    compatible = "brcm,bcm2712";
+
+    // 第一个 fragment：负责配置硬件引脚（Pinctrl）
+    fragment@0 {
+        target = <&rp1_gpio>; 
+        __overlay__ {
+            edge_alarm_pins: edge_alarm_pins_config {
+                brcm,pins = <17>;
+                brcm,function = <0>;
+                brcm,pull = <1>;
+            };
+        };
+    };
+
+    // 第二个 fragment：你的设备节点
+    fragment@1 {
+        target-path = "/";
+        __overlay__ {
+            edge_alarm: edge_alarm_device {
+                compatible = "edge_sentinel,mcu";
+                // 引用你在 fragment@0 中定义的引脚状态
+                pinctrl-names = "default";
+                pinctrl-0 = <&edge_alarm_pins>;
+                
+                // 使用宏定义替换魔法数字
+                interrupt-parent = <&rp1_gpio>;
+                interrupts = <17 1>; // GPIO 17, 上升沿触发
+                status = "okay";
+            };
+        };
+    };
+
+    fragment@2 {
+        target = <&i2c1>;
+        __overlay__ {
+            #address-cells = <1>;
+            #size-cells = <0>;
+            status = "okay";
+
+            imu@68 {
+                compatible = "invensense,mpu6050";
+                reg = <0x68>;
+
+                status = "okay";
+            };
+        };
+
+    };
+};
