@@ -1,7 +1,7 @@
 # 编译器和编译选项
 CC = gcc
 CFLAGS = -Wall -O2 -g -Iinclude
-LIBS = -lsqlite3
+LIBS = -lsqlite3 -lm
 # 如果你的测试文件在 tests 目录，需要加上这个包含路径
 CFLAGS += -I. 
 CFLAGS += -Iexternal

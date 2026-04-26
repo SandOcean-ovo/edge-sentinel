@@ -1,11 +1,21 @@
 #include <linux/module.h>
 #include <linux/i2c.h>
-#include <linux/of.h> // 设备树匹配
+#include <linux/of.h>
 #include <linux/regmap.h>
 #include <linux/iio/iio.h>
 #include <linux/iio/sysfs.h>
+#include <linux/miscdevice.h>
+#include <linux/mutex.h>
+#include <linux/uaccess.h>
 
-// 定义一个辅助宏，用于快速生成 XYZ 三轴的加速度通道
+/* ioctl 命令码 —— 与 userspace 头文件 gateway_monitor_ioctl.h 保持同步 */
+#define GATEWAY_MONITOR_IOC_MAGIC 'G'
+#define GATEWAY_MONITOR_IOC_SET_PEAK_THR _IOW(GATEWAY_MONITOR_IOC_MAGIC, 1, float)
+#define GATEWAY_MONITOR_IOC_SET_RMS_THR  _IOW(GATEWAY_MONITOR_IOC_MAGIC, 2, float)
+#define GATEWAY_MONITOR_IOC_SET_GYRO_THR _IOW(GATEWAY_MONITOR_IOC_MAGIC, 3, float)
+
+#define MPU6050_ACCEL_SCALE_DEFAULT (9.80665f / 16384.0f)
+
 #define MPU6050_ACCEL_CHAN(_axis, _addr) {                   \
     .type = IIO_ACCEL,                                       \
     .modified = 1,                                           \
@@ -16,20 +26,87 @@
 
 static const struct of_device_id gateway_monitor_of_match[] = {
     {.compatible = "invensense,mpu6050"},
-    {/* 结尾哨兵，必须有 */}};
+    {/* sentinel */}};
 
 MODULE_DEVICE_TABLE(of, gateway_monitor_of_match);
 
 static const struct regmap_config mpu6050_regmap_config = {
-    .reg_bits = 8,        // 寄存器地址是 8 位
-    .val_bits = 8,        // 寄存器里的数据是 8 位
-    .max_register = 0x75, // 我们目前知道的最大寄存器地址是 WHO_AM_I
+    .reg_bits = 8,
+    .val_bits = 8,
+    .max_register = 0x75,
 };
 
 struct mpu6050_data
 {
     struct regmap *regmap;
+    struct miscdevice miscdev;
+    /* 阈值 —— mutex 保护，ioctl 写 / read_raw 读 之间存在竞态 */
+    struct mutex thr_lock;
+    float accel_peak_thr;
+    float accel_rms_thr;
+    float gyro_thr;
 };
+
+static struct i2c_client *global_client;
+
+/* ---------- misc 设备 ioctl ---------- */
+
+static long gateway_monitor_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
+{
+    struct mpu6050_data *data = filp->private_data;
+    float val;
+
+    switch (cmd) {
+    case GATEWAY_MONITOR_IOC_SET_PEAK_THR:
+        if (copy_from_user(&val, (float __user *)arg, sizeof(val)))
+            return -EFAULT;
+        mutex_lock(&data->thr_lock);
+        data->accel_peak_thr = val;
+        mutex_unlock(&data->thr_lock);
+        pr_info("gateway_monitor: peak threshold set to %.3f g\n", val);
+        break;
+    case GATEWAY_MONITOR_IOC_SET_RMS_THR:
+        if (copy_from_user(&val, (float __user *)arg, sizeof(val)))
+            return -EFAULT;
+        mutex_lock(&data->thr_lock);
+        data->accel_rms_thr = val;
+        mutex_unlock(&data->thr_lock);
+        pr_info("gateway_monitor: rms threshold set to %.3f g\n", val);
+        break;
+    case GATEWAY_MONITOR_IOC_SET_GYRO_THR:
+        if (copy_from_user(&val, (float __user *)arg, sizeof(val)))
+            return -EFAULT;
+        mutex_lock(&data->thr_lock);
+        data->gyro_thr = val;
+        mutex_unlock(&data->thr_lock);
+        pr_info("gateway_monitor: gyro threshold set to %.1f deg/s\n", val);
+        break;
+    default:
+        return -ENOTTY;
+    }
+    return 0;
+}
+
+static int gateway_monitor_misc_open(struct inode *inode, struct file *file)
+{
+    if (!global_client)
+        return -ENODEV;
+
+    struct iio_dev *indio_dev = i2c_get_clientdata(global_client);
+    if (!indio_dev)
+        return -ENODEV;
+
+    file->private_data = iio_priv(indio_dev);
+    return 0;
+}
+
+static const struct file_operations gateway_monitor_misc_fops = {
+    .owner = THIS_MODULE,
+    .open = gateway_monitor_misc_open,
+    .unlocked_ioctl = gateway_monitor_ioctl,
+};
+
+/* ---------- IIO read_raw ---------- */
 
 static int mpu6050_read_raw(struct iio_dev *indio_dev,
                             struct iio_chan_spec const *chan,
@@ -39,29 +116,36 @@ static int mpu6050_read_raw(struct iio_dev *indio_dev,
     unsigned int val_h, val_l;
     int ret;
 
-    // 我们目前只处理读取 RAW 数据的情况
     if (mask != IIO_CHAN_INFO_RAW)
         return -EINVAL;
 
-    // 1. 使用 regmap_read 读取 chan->address (高八位)，存入 val_h
     ret = regmap_read(data->regmap, chan->address, &val_h);
-    if (ret < 0)
-    {
-        pr_err("gateway_monitor: regmap_read 失败 %d\n", ret);
+    if (ret < 0) {
+        pr_err("gateway_monitor: regmap_read failed %d\n", ret);
         return ret;
     }
 
-    // 2. 使用 regmap_read 读取 chan->address + 1 (低八位)，存入 val_l
     ret = regmap_read(data->regmap, chan->address + 1, &val_l);
-    if (ret < 0)
-    {
-        pr_err("gateway_monitor: regmap_read 失败 %d\n", ret);
+    if (ret < 0) {
+        pr_err("gateway_monitor: regmap_read failed %d\n", ret);
         return ret;
     }
-    // 3. 把 val_h 和 val_l 拼起来，强转为 short (有符号16位)，赋给 *val
+
     *val = (short)((val_h << 8) | val_l);
 
-    // 返回 IIO_VAL_INT，告诉 IIO 子系统 *val 里面有一个整型数据
+    /* 阈值比较：ioctl 路径和 read_raw 路径共享 thr_lock */
+    if (chan->type == IIO_ACCEL) {
+        float accel_g = (float)(*val) * MPU6050_ACCEL_SCALE_DEFAULT / 9.80665f;
+        float abs_g = accel_g < 0 ? -accel_g : accel_g;
+
+        mutex_lock(&data->thr_lock);
+        if (data->accel_peak_thr > 0.0f && abs_g > data->accel_peak_thr) {
+            pr_warn("gateway_monitor: ACCEL ch%d raw=%d (%.3f g) exceeds peak threshold %.3f g\n",
+                    chan->address, *val, accel_g, data->accel_peak_thr);
+        }
+        mutex_unlock(&data->thr_lock);
+    }
+
     return IIO_VAL_INT;
 }
 
@@ -70,11 +154,12 @@ static const struct iio_info mpu6050_iio_info = {
 };
 
 static const struct iio_chan_spec mpu6050_channels[] = {
-    // 0x3B 是 ACCEL_XOUT_H 的地址
     MPU6050_ACCEL_CHAN(X, 0x3B),
     MPU6050_ACCEL_CHAN(Y, 0x3D),
     MPU6050_ACCEL_CHAN(Z, 0x3F),
 };
+
+/* ---------- probe / remove ---------- */
 
 static int imu_probe(struct i2c_client *client)
 {
@@ -85,9 +170,8 @@ static int imu_probe(struct i2c_client *client)
     struct mpu6050_data *data;
 
     regmap = devm_regmap_init_i2c(client, &mpu6050_regmap_config);
-    if (IS_ERR(regmap))
-    {
-        pr_err("gateway_monitor: regmap 失败 %ld\n", PTR_ERR(regmap));
+    if (IS_ERR(regmap)) {
+        pr_err("gateway_monitor: regmap init failed %ld\n", PTR_ERR(regmap));
         return PTR_ERR(regmap);
     }
 
@@ -97,6 +181,7 @@ static int imu_probe(struct i2c_client *client)
 
     data = iio_priv(indio_dev);
     data->regmap = regmap;
+    mutex_init(&data->thr_lock);
 
     indio_dev->name = "mpu6050";
     indio_dev->modes = INDIO_DIRECT_MODE;
@@ -105,37 +190,54 @@ static int imu_probe(struct i2c_client *client)
     indio_dev->num_channels = ARRAY_SIZE(mpu6050_channels);
 
     ret = regmap_read(regmap, 0x75, &val);
-    if (ret < 0)
-    {
-        pr_err("gateway_monitor: regmap_read 失败 %d\n", ret);
+    if (ret < 0) {
+        pr_err("gateway_monitor: WHO_AM_I read failed %d\n", ret);
         return ret;
     }
     pr_info("gateway_monitor: WHO_AM_I = 0x%02x\n", val);
 
-    if (val != 0x68)
-    {
-        pr_err("gateway_monitor: 芯片 ID 不匹配\n");
+    if (val != 0x68) {
+        pr_err("gateway_monitor: chip ID mismatch\n");
         return -ENODEV;
     }
 
-    // 写入 0x00 到 0x6B 寄存器，解除休眠模式
     ret = regmap_write(regmap, 0x6B, 0x00);
-    if (ret < 0)
-    {
-        pr_err("gateway_monitor: 唤醒传感器失败\n");
+    if (ret < 0) {
+        pr_err("gateway_monitor: wakeup sensor failed\n");
         return ret;
     }
 
+    /* 注册 IIO 设备 */
     ret = devm_iio_device_register(&client->dev, indio_dev);
     if (ret)
         return ret;
 
-    pr_info("gateway_monitor: probe 成功!\n");
+    /* 注册 misc 字符设备，暴露 ioctl 接口 */
+    data->miscdev.minor = MISC_DYNAMIC_MINOR;
+    data->miscdev.name = "gateway_monitor";
+    data->miscdev.fops = &gateway_monitor_misc_fops;
+    ret = misc_register(&data->miscdev);
+    if (ret) {
+        pr_err("gateway_monitor: misc_register failed %d\n", ret);
+        return ret;
+    }
+
+    i2c_set_clientdata(client, indio_dev);
+    global_client = client;
+
+    pr_info("gateway_monitor: probe success, misc device /dev/gateway_monitor\n");
     return 0;
 }
 
 static void imu_remove(struct i2c_client *client)
 {
+    struct iio_dev *indio_dev = i2c_get_clientdata(client);
+    struct mpu6050_data *data = iio_priv(indio_dev);
+
+    misc_deregister(&data->miscdev);
+    mutex_destroy(&data->thr_lock);
+    global_client = NULL;
+
     pr_info("gateway_monitor: removed\n");
 }
 

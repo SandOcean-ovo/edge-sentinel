@@ -25,15 +25,20 @@ typedef struct edge_alarm_dev
 
 MODULE_DEVICE_TABLE(of, mcu_of_match);
 
-static irqreturn_t mcu_alarm_irq_handler(int irq, void *dev_id)
+irqreturn_t mcu_alarm_irq_handler(int irq, void *dev_id);
+
+irqreturn_t mcu_alarm_irq_handler(int irq, void *dev_id)
 {
     struct edge_alarm_dev *my_dev = (struct edge_alarm_dev *)dev_id;
-    wake_up_interruptible(&my_dev->wait_queue);
-
+    
     my_dev->alarm_flag = 1;
+
+    wake_up_interruptible(&my_dev->wait_queue);
 
     return IRQ_HANDLED;
 }
+
+EXPORT_SYMBOL(mcu_alarm_irq_handler);
 
 static int mcu_alarm_open(struct inode *inode, struct file *file)
 {

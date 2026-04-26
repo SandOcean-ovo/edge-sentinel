@@ -1,6 +1,9 @@
 #include "protocol_utils.h"
 
-static double round_to_3(float val) {
+#include <math.h>
+
+static double round_to_3(float val)
+{
     return floor(val * 1000.0 + 0.5) / 1000.0;
 }
 
@@ -60,5 +63,53 @@ int protocol_encode_batch(const sensor_data_t *data_array, int count, char *out_
 
     cJSON_Delete(array);
 
+    return ok ? 0 : -1;
+}
+
+int protocol_encode_alarm_pose(const char *device_id, int alarm_active,
+                               const gateway_pose_t *pose,
+                               char *out_buf, size_t buf_len)
+{
+    if (!device_id || !pose || !out_buf || buf_len == 0)
+        return -1;
+
+    cJSON *root = cJSON_CreateObject();
+    cJSON *gateway_pose = cJSON_CreateObject();
+    cJSON *accel_raw = cJSON_CreateObject();
+    cJSON *accel_g = cJSON_CreateObject();
+    if (!root || !gateway_pose || !accel_raw || !accel_g)
+    {
+        cJSON_Delete(root);
+        cJSON_Delete(gateway_pose);
+        cJSON_Delete(accel_raw);
+        cJSON_Delete(accel_g);
+        return -1;
+    }
+
+    cJSON_AddStringToObject(root, "device_id", device_id);
+    cJSON_AddNumberToObject(root, "alarm", alarm_active);
+    cJSON_AddNumberToObject(root, "timestamp", pose->timestamp);
+
+    cJSON_AddNumberToObject(gateway_pose, "valid", pose->valid);
+
+    cJSON_AddNumberToObject(accel_raw, "x", pose->accel_x_raw);
+    cJSON_AddNumberToObject(accel_raw, "y", pose->accel_y_raw);
+    cJSON_AddNumberToObject(accel_raw, "z", pose->accel_z_raw);
+    cJSON_AddItemToObject(gateway_pose, "accel_raw", accel_raw);
+
+    cJSON_AddNumberToObject(gateway_pose, "accel_scale_mps2", pose->accel_scale);
+
+    cJSON_AddNumberToObject(accel_g, "x", pose->accel_x_g);
+    cJSON_AddNumberToObject(accel_g, "y", pose->accel_y_g);
+    cJSON_AddNumberToObject(accel_g, "z", pose->accel_z_g);
+    cJSON_AddItemToObject(gateway_pose, "accel_g", accel_g);
+
+    cJSON_AddNumberToObject(gateway_pose, "roll_deg", pose->roll_deg);
+    cJSON_AddNumberToObject(gateway_pose, "pitch_deg", pose->pitch_deg);
+    cJSON_AddNumberToObject(gateway_pose, "tilt_deg", pose->tilt_deg);
+    cJSON_AddItemToObject(root, "gateway_pose", gateway_pose);
+
+    int ok = cJSON_PrintPreallocated(root, out_buf, (int)buf_len, 0);
+    cJSON_Delete(root);
     return ok ? 0 : -1;
 }

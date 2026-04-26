@@ -7,6 +7,7 @@
 #include <stdio.h>
 #include <stdint.h>
 #include <stdbool.h>
+#include <fcntl.h>
 
 #include "conf.h"
 #include "log.h"
@@ -17,14 +18,17 @@
 #include "db.h"
 #include "protocol_utils.h"
 #include "net_client.h"
+#include "gateway_pose.h"
+#include "gateway_monitor_ioctl.h"
 
-#define MAX_EVENTS 10
+#define MAX_EVENTS 16
 #define DEFAULT_CONF_PATH "/etc/edge_gateway/gateway.conf"
 #define BATCH_SIZE 10
 #define JSON_PACK_SIZE 4096
 #define DEFAULT_CLEANUP_INTERVAL 7
 #define TIMER_INTERVAL_SEC 5
 #define CLEANUP_THRESHOLD (3600 / TIMER_INTERVAL_SEC)
+#define EDGE_ALARM_DEV "/dev/edge_alarm"
 
 /* ---------- 全局状态 ---------- */
 static uint8_t g_buf[512];
@@ -37,6 +41,16 @@ static void signal_handler(int sig)
 {
     (void)sig;
     keep_running = 0;
+}
+
+static void trace_marker(const char *msg)
+{
+    int fd = open("/sys/kernel/debug/tracing/trace_marker", O_WRONLY | O_CLOEXEC);
+    if (fd >= 0)
+    {
+        write(fd, msg, strlen(msg));
+        close(fd);
+    }
 }
 
 /* ---------- 小工具 ---------- */
@@ -58,6 +72,15 @@ static void epoll_del(int epfd, int fd)
     if (fd >= 0)
     {
         epoll_ctl(epfd, EPOLL_CTL_DEL, fd, NULL);
+    }
+}
+
+static void safe_close(int *fd)
+{
+    if (*fd >= 0)
+    {
+        close(*fd);
+        *fd = -1;
     }
 }
 
@@ -84,6 +107,107 @@ static void try_reconnect_tcp(int epfd, int *sock_fd, const GatewayConfig_t *cfg
 
     // 连接建立前监听可写事件，连上后再改为只监听读和断开
     epoll_add(epfd, *sock_fd, EPOLLIN | EPOLLOUT | EPOLLRDHUP);
+}
+
+static int open_edge_alarm_device(void)
+{
+    int fd = open(EDGE_ALARM_DEV, O_RDONLY | O_NONBLOCK);
+    if (fd < 0)
+    {
+        edge_log(LOG_WARN, "Failed to open %s: %s", EDGE_ALARM_DEV, strerror(errno));
+    }
+    return fd;
+}
+
+static void push_thresholds_to_driver(const GatewayConfig_t *cfg)
+{
+    int fd = open(GATEWAY_MONITOR_DEVICE, O_RDWR);
+    if (fd < 0)
+    {
+        edge_log(LOG_WARN, "Cannot open %s for threshold push: %s",
+                 GATEWAY_MONITOR_DEVICE, strerror(errno));
+        return;
+    }
+
+    if (ioctl(fd, GATEWAY_MONITOR_IOC_SET_PEAK_THR, &cfg->accel_peak_threshold) != 0)
+        edge_log(LOG_WARN, "Failed to set peak threshold via ioctl");
+    else
+        edge_log(LOG_INFO, "Driver peak threshold set: %.3f g", cfg->accel_peak_threshold);
+
+    if (ioctl(fd, GATEWAY_MONITOR_IOC_SET_RMS_THR, &cfg->accel_rms_threshold) != 0)
+        edge_log(LOG_WARN, "Failed to set rms threshold via ioctl");
+    else
+        edge_log(LOG_INFO, "Driver rms threshold set: %.3f g", cfg->accel_rms_threshold);
+
+    if (ioctl(fd, GATEWAY_MONITOR_IOC_SET_GYRO_THR, &cfg->gyro_threshold) != 0)
+        edge_log(LOG_WARN, "Failed to set gyro threshold via ioctl");
+    else
+        edge_log(LOG_INFO, "Driver gyro threshold set: %.1f deg/s", cfg->gyro_threshold);
+
+    close(fd);
+}
+
+static int refresh_edge_alarm_fd(int epfd, int *alarm_fd)
+{
+    if (*alarm_fd >= 0)
+        return 0;
+
+    int new_fd = open_edge_alarm_device();
+    if (new_fd < 0)
+        return -1;
+
+    if (epoll_add(epfd, new_fd, EPOLLIN | EPOLLET | EPOLLERR | EPOLLHUP | EPOLLRDHUP) != 0)
+    {
+        edge_log(LOG_ERROR, "Failed to add %s to epoll: %s", EDGE_ALARM_DEV, strerror(errno));
+        close(new_fd);
+        return -1;
+    }
+
+    *alarm_fd = new_fd;
+    edge_log(LOG_INFO, "%s detected and registered to epoll (fd=%d)", EDGE_ALARM_DEV, new_fd);
+    return 0;
+}
+
+static void maybe_send_alarm_snapshot(int epfd, int *sock_fd, const GatewayConfig_t *cfg)
+{
+    gateway_pose_t pose = {0};
+    char json_payload[JSON_PACK_SIZE];
+
+    if (gateway_pose_read_snapshot(&pose) != 0)
+    {
+        edge_log(LOG_WARN, "Alarm triggered but no valid IIO pose snapshot available");
+        pose.timestamp = (uint32_t)time(NULL);
+    }
+
+    if (protocol_encode_alarm_pose(cfg->device_id, 1, &pose,
+                                   json_payload, sizeof(json_payload)) != 0)
+        return;
+
+    edge_log(LOG_INFO, "Alarm payload ready: %s", json_payload);
+
+    if (net_client_get_fd() < 0)
+    {
+        drop_tcp(epfd, sock_fd);
+        try_reconnect_tcp(epfd, sock_fd, cfg);
+        return;
+    }
+
+    int total_send = (int)strlen(json_payload);
+    int sent_bytes = net_client_send(json_payload, total_send);
+    if (sent_bytes < 0)
+    {
+        edge_log(LOG_ERROR, "Failed to send alarm snapshot");
+        drop_tcp(epfd, sock_fd);
+        return;
+    }
+
+    if (sent_bytes != total_send)
+    {
+        edge_log(LOG_WARN, "Partial alarm send (%d/%d)", sent_bytes, total_send);
+        return;
+    }
+
+    edge_log(LOG_INFO, "Alarm snapshot sent successfully");
 }
 
 /* ---------- 定时器里：上报一批未发数据 ---------- */
@@ -144,8 +268,47 @@ static void handle_uart_event(int uart_fd, uint32_t events)
     }
 }
 
+static void handle_alarm_event(int epfd, int *alarm_fd, int *sock_fd, const GatewayConfig_t *cfg, uint32_t events)
+{
+    if (*alarm_fd < 0)
+        return;
+
+    if (events & (EPOLLHUP | EPOLLERR | EPOLLRDHUP))
+    {
+        edge_log(LOG_WARN, "edge_alarm device disappeared");
+        epoll_del(epfd, *alarm_fd);
+        safe_close(alarm_fd);
+        return;
+    }
+
+    char discard[16];
+    while (read(*alarm_fd, discard, sizeof(discard)) > 0)
+    {
+        /* 清空边沿触发数据 */
+    }
+
+    edge_log(LOG_INFO, "edge_alarm triggered, reading IIO snapshot...");
+
+    /* 用户态兜底：读取姿态后先用本地阈值判断 */
+    gateway_pose_t pose_check = {0};
+    if (gateway_pose_read_snapshot(&pose_check) == 0 && pose_check.valid)
+    {
+        const char *reason = NULL;
+        if (gateway_pose_check_threshold(&pose_check,
+                                         cfg->accel_peak_threshold,
+                                         cfg->accel_rms_threshold,
+                                         cfg->gyro_threshold,
+                                         &reason))
+        {
+            edge_log(LOG_WARN, "Userspace fallback: gateway pose exceeds %s!", reason);
+        }
+    }
+
+    maybe_send_alarm_snapshot(epfd, sock_fd, cfg);
+}
+
 static void handle_timer_event(int epfd, int timer_fd, int *sock_fd,
-                               const GatewayConfig_t *cfg,
+                               int *alarm_fd, const GatewayConfig_t *cfg,
                                sensor_data_t *batch_list,
                                char *json_payload, size_t json_size,
                                int *cleanup_counter)
@@ -154,6 +317,11 @@ static void handle_timer_event(int epfd, int timer_fd, int *sock_fd,
     ssize_t s = read(timer_fd, &expirations, sizeof(expirations));
     if (s != sizeof(expirations))
         return;
+
+    if (refresh_edge_alarm_fd(epfd, alarm_fd) == 0 && *alarm_fd >= 0)
+    {
+        /* Do Nothing */
+    }
 
     // 连接掉了：尝试重连，然后这一轮就不做上报
     if (net_client_get_fd() < 0)
@@ -250,6 +418,7 @@ int main(int argc, char **argv)
         return (rc > 0) ? 0 : -1;
 
     int cleanup_counter = 0;
+    int alarm_fd = -1;
 
     /* ----- 各模块初始化 ----- */
     GatewayConfig_t config = {0};
@@ -265,6 +434,8 @@ int main(int argc, char **argv)
         return -1;
     }
     edge_log(LOG_INFO, "Gateway started! Baudrate: %d", config.baudrate);
+
+    push_thresholds_to_driver(&config);
 
     RingBuf_init(&g_ringbuf, g_buf, sizeof(g_buf));
 
@@ -290,11 +461,13 @@ int main(int argc, char **argv)
     }
     int sock_fd = net_client_get_fd();
 
-    /* ----- epoll & timerfd ----- */
+    alarm_fd = open_edge_alarm_device();
+
     int epfd = epoll_create1(0);
     if (epfd < 0)
     {
         fprintf(stderr, "Fatal: Failed to create epoll instance\n");
+        safe_close(&alarm_fd);
         return -1;
     }
 
@@ -302,17 +475,23 @@ int main(int argc, char **argv)
     if (timer_fd < 0)
     {
         fprintf(stderr, "Fatal: Failed to create timerfd\n");
+        safe_close(&alarm_fd);
+        safe_close(&uart_fd);
+        safe_close(&epfd);
         return -1;
     }
 
     epoll_add(epfd, uart_fd, EPOLLIN);
     epoll_add(epfd, timer_fd, EPOLLIN);
+    if (alarm_fd >= 0)
+    {
+        epoll_add(epfd, alarm_fd, EPOLLIN | EPOLLET | EPOLLERR | EPOLLHUP | EPOLLRDHUP);
+    }
     if (sock_fd >= 0)
     {
         epoll_add(epfd, sock_fd, EPOLLIN);
     }
 
-    /* ----- 主循环 ----- */
     sensor_data_t batch_list[BATCH_SIZE];
     char json_payload[JSON_PACK_SIZE];
     struct epoll_event events[MAX_EVENTS];
@@ -320,8 +499,12 @@ int main(int argc, char **argv)
     while (keep_running)
     {
         int nfds = epoll_wait(epfd, events, MAX_EVENTS, 1000);
+        trace_marker("USER_EPOLL_RETURN\n");
         if (nfds < 0)
         {
+            if (errno == EINTR)
+                continue;
+            edge_log(LOG_ERROR, "epoll_wait failed: %s", strerror(errno));
             continue;
         }
 
@@ -336,8 +519,12 @@ int main(int argc, char **argv)
             }
             else if (fd == timer_fd)
             {
-                handle_timer_event(epfd, timer_fd, &sock_fd, &config,
+                handle_timer_event(epfd, timer_fd, &sock_fd, &alarm_fd, &config,
                                    batch_list, json_payload, sizeof(json_payload), &cleanup_counter);
+            }
+            else if (fd == alarm_fd)
+            {
+                handle_alarm_event(epfd, &alarm_fd, &sock_fd, &config, ev);
             }
             else if (fd == sock_fd)
             {
@@ -346,15 +533,12 @@ int main(int argc, char **argv)
         }
     }
 
-    /* ----- 清理 ----- */
     edge_log(LOG_INFO, "Gateway shutting down.");
 
-    if (uart_fd >= 0)
-        close(uart_fd);
-    if (timer_fd >= 0)
-        close(timer_fd);
-    if (epfd >= 0)
-        close(epfd);
+    safe_close(&uart_fd);
+    safe_close(&timer_fd);
+    safe_close(&alarm_fd);
+    safe_close(&epfd);
     net_client_deinit();
     db_deinit();
     log_deinit();

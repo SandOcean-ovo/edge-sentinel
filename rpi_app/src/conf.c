@@ -53,6 +53,18 @@ int load_config(const char *file_path, GatewayConfig_t *config)
         {
             config->temp_threshold = atof(value);
         }
+        else if (strcmp(key, "accel_peak_threshold") == 0)
+        {
+            config->accel_peak_threshold = atof(value);
+        }
+        else if (strcmp(key, "accel_rms_threshold") == 0)
+        {
+            config->accel_rms_threshold = atof(value);
+        }
+        else if (strcmp(key, "gyro_threshold") == 0)
+        {
+            config->gyro_threshold = atof(value);
+        }
         else if (strcmp(key, "device_id") == 0)
         {
             strncpy(config->device_id, value, sizeof(config->device_id) - 1);

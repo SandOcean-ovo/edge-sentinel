@@ -144,5 +144,6 @@ int net_client_send(const char *data, size_t len)
             return -1; // 真正错误
         }
     }
-    return (int)sent; // 一定等于 len
+    return (int)sent;
 }
+

@@ -137,7 +137,7 @@ int db_mark_as_sent(int id)
 int db_cleanup_old_data(int days)
 {
     char sql[128];
-    snprintf(sql, sizeof(sql), "DELETE FROM sensor_data WHERE timestamp < strftime('%%s', 'now', '-%d days');", days);
+    snprintf(sql, sizeof(sql), "DELETE FROM sensor_logs WHERE timestamp < strftime('%%s', 'now', '-%d days');", days);
 
     char *err_msg = NULL;
     if (sqlite3_exec(g_db, sql, NULL, NULL, &err_msg) != SQLITE_OK)

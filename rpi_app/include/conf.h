@@ -14,6 +14,9 @@ typedef struct GatewayConfig_t
     char uart_dev[STR_MAX_LEN];  /* 串口挂载 */
     int baudrate;                /* 串口波特率 */
     float temp_threshold;        /* 温度阈值 */
+    float accel_peak_threshold;  /* 加速度峰值阈值 (g) */
+    float accel_rms_threshold;   /* 加速度 RMS 阈值 (g) */
+    float gyro_threshold;        /* 角速度阈值 (deg/s) */
     char log_file[STR_MAX_LEN];  /* 日志路径 */
     char db_path[STR_MAX_LEN];   /* 数据库路径 */
     char ip[STR_MAX_LEN];
