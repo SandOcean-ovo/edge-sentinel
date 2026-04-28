@@ -19,7 +19,6 @@ build/
 *.log
 *.db
 
-# 4. 外部库
-external/
+# 4. 外部库（cJSON / Unity 等需要跟踪，不要 ignore）
 
 规划-final.md

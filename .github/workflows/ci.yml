@@ -1,0 +1,87 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  unit-tests:
+    name: Unit Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libsqlite3-dev
+
+      - name: Build and run tests
+        working-directory: rpi_app
+        run: make test
+
+      - name: Generate JUnit XML report
+        working-directory: rpi_app
+        run: make test-xml
+
+      - name: Upload test report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-report
+          path: rpi_app/build/test_report.xml
+
+  arm-cross-compile:
+    name: ARM Cross-Compile
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install ARM cross-compiler
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-arm-linux-gnueabihf
+
+      - name: Cross-compile object files
+        working-directory: rpi_app
+        run: |
+          make clean
+          make compile-check CC=arm-linux-gnueabihf-gcc
+
+      - name: Attempt full link (best-effort)
+        working-directory: rpi_app
+        continue-on-error: true
+        run: |
+          sudo dpkg --add-architecture armhf
+          sudo apt-get update
+          sudo apt-get install -y libsqlite3-dev:armhf || true
+          make CC=arm-linux-gnueabihf-gcc
+
+  static-analysis:
+    name: Static Analysis
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install cppcheck
+        run: sudo apt-get update && sudo apt-get install -y cppcheck
+
+      - name: cppcheck rpi_app source
+        working-directory: rpi_app
+        run: |
+          cppcheck --enable=warning,style,performance \
+                   --error-exitcode=1 \
+                   --suppress=missingIncludeSystem \
+                   -Iinclude -Iexternal \
+                   src/ tests/
+
+      - name: cppcheck STM32 firmware
+        run: |
+          cppcheck --enable=warning,style,performance \
+                   --suppress=missingIncludeSystem \
+                   -Istm32_f411_fw/edge_node_f411/Core/Inc \
+                   -Istm32_f411_fw/edge_node_f411/Hardware \
+                   stm32_f411_fw/edge_node_f411/Core/Src/ \
+                   stm32_f411_fw/edge_node_f411/Hardware/ 2>&1 || true

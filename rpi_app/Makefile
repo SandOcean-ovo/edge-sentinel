@@ -1,6 +1,6 @@
 # 编译器和编译选项
 CC = gcc
-CFLAGS = -Wall -O2 -g -Iinclude
+CFLAGS = -Wall -O2 -g -Iinclude -DUNITY_INCLUDE_FLOAT
 LIBS = -lsqlite3 -lm
 # 如果你的测试文件在 tests 目录，需要加上这个包含路径
 CFLAGS += -I. 
@@ -64,7 +64,41 @@ $(BUILD_DIR)/%.o: $(EXTERNAL_DIR)/%.c
 $(BUILD_DIR)/%.o: $(TEST_DIR)/%.c
 	$(CC) $(CFLAGS) -c $< -o $@
 
+# 只编译不链接，用于 CI 交叉编译检查（无需安装 ARM 版 libsqlite3）
+compile-check: $(BUILD_DIR) $(LIB_OBJS) $(EXTERNAL_OBJS) $(patsubst $(SRC_DIR)/%.c, $(BUILD_DIR)/%.o, $(APP_MAIN_SRC))
+	@echo "All objects compiled for architecture check"
+
+# 运行测试并生成 JUnit XML 报告
+test-xml: $(BUILD_DIR) $(TEST_TARGET)
+	@echo "Running tests with JUnit XML output..."
+	@./$(TEST_TARGET) > $(BUILD_DIR)/test_stdout.txt 2>&1; \
+	TEST_EXIT=$$?; \
+	awk -F: ' \
+	/:(PASS|FAIL)/ { \
+		n = split($$0, parts, ":"); \
+		tname = parts[n-1]; \
+		status = parts[n]; \
+		if (status == "PASS") { \
+			xml = xml sprintf("    <testcase classname=\"rpi_app\" name=\"%s\"/>\n", tname); \
+			tc++; \
+		} else if (status == "FAIL") { \
+			msg = $$0; \
+			gsub(/"/, "\\&quot;", msg); \
+			xml = xml sprintf("    <testcase classname=\"rpi_app\" name=\"%s\">\n      <failure message=\"%s\"/>\n    </testcase>\n", tname, msg); \
+			tc++; fail++; \
+		} \
+	} \
+	END { \
+		printf "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"; \
+		printf "<testsuites>\n"; \
+		printf "  <testsuite name=\"edge-sentinel\" tests=\"%d\" failures=\"%d\">\n", tc, fail; \
+		printf "%s", xml; \
+		printf "  </testsuite>\n"; \
+		printf "</testsuites>\n"; \
+	}' $(BUILD_DIR)/test_stdout.txt > $(BUILD_DIR)/test_report.xml; \
+	exit $$TEST_EXIT
+
 clean:
 	rm -rf $(BUILD_DIR)
 
-.PHONY: all clean test
+.PHONY: all clean test test-xml compile-check

@@ -129,17 +129,21 @@ static void push_thresholds_to_driver(const GatewayConfig_t *cfg)
         return;
     }
 
-    if (ioctl(fd, GATEWAY_MONITOR_IOC_SET_PEAK_THR, &cfg->accel_peak_threshold) != 0)
+    int32_t peak_mg = (int32_t)(cfg->accel_peak_threshold * 1000.0f);
+    int32_t rms_mg  = (int32_t)(cfg->accel_rms_threshold * 1000.0f);
+    int32_t gyro_md = (int32_t)(cfg->gyro_threshold * 1000.0f);
+
+    if (ioctl(fd, GATEWAY_MONITOR_IOC_SET_PEAK_THR, &peak_mg) != 0)
         edge_log(LOG_WARN, "Failed to set peak threshold via ioctl");
     else
         edge_log(LOG_INFO, "Driver peak threshold set: %.3f g", cfg->accel_peak_threshold);
 
-    if (ioctl(fd, GATEWAY_MONITOR_IOC_SET_RMS_THR, &cfg->accel_rms_threshold) != 0)
+    if (ioctl(fd, GATEWAY_MONITOR_IOC_SET_RMS_THR, &rms_mg) != 0)
         edge_log(LOG_WARN, "Failed to set rms threshold via ioctl");
     else
         edge_log(LOG_INFO, "Driver rms threshold set: %.3f g", cfg->accel_rms_threshold);
 
-    if (ioctl(fd, GATEWAY_MONITOR_IOC_SET_GYRO_THR, &cfg->gyro_threshold) != 0)
+    if (ioctl(fd, GATEWAY_MONITOR_IOC_SET_GYRO_THR, &gyro_md) != 0)
         edge_log(LOG_WARN, "Failed to set gyro threshold via ioctl");
     else
         edge_log(LOG_INFO, "Driver gyro threshold set: %.1f deg/s", cfg->gyro_threshold);
