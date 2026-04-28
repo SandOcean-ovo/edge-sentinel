@@ -3,6 +3,6 @@
 
 #include <stdint.h>
 
-uint16_t crc_calculate(uint8_t* pdata, uint8_t len);
+uint16_t crc_calculate(const uint8_t* pdata, uint8_t len);
 
 #endif

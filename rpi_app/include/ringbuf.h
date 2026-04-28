@@ -24,11 +24,11 @@ bool RingBuf_read(RingBuf_t *pbuf, uint8_t *pdes);
  */
 bool RingBuf_peek(RingBuf_t *pbuf, uint8_t *pdes, uint32_t offset);
 
-uint32_t RingBuf_writeblocks(RingBuf_t *pbuf, uint8_t *psrc, uint32_t len);
+uint32_t RingBuf_writeblocks(RingBuf_t *pbuf, const uint8_t *psrc, uint32_t len);
 
 uint32_t RingBuf_readblocks(RingBuf_t *pbuf, uint8_t *pdes, uint32_t len);
 
-uint32_t RingBuf_getreadable(RingBuf_t *pbuf);
+uint32_t RingBuf_getreadable(const RingBuf_t *pbuf);
 
 uint32_t RingBuf_skip(RingBuf_t *pbuf, uint32_t len);
 

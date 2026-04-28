@@ -24,37 +24,72 @@ void tearDown(void) {}
 
 static void make_path(char *out, size_t out_size, const char *dir, const char *name)
 {
+    if (out == NULL || out_size == 0 || dir == NULL || name == NULL) {
+        TEST_FAIL_MESSAGE("invalid path input");
+        return;
+    }
+
     int n = snprintf(out, out_size, "%s/%s", dir, name);
-    TEST_ASSERT_TRUE(n >= 0 && (size_t)n < out_size);
+    if (n < 0 || (size_t)n >= out_size) {
+        out[0] = '\0';
+        TEST_FAIL_MESSAGE("path too long");
+    }
 }
 
 static void write_text_file(const char *path, const char *content)
 {
+    if (path == NULL || content == NULL) {
+        TEST_FAIL_MESSAGE("invalid file input");
+        return;
+    }
+
     FILE *fp = fopen(path, "w");
-    TEST_ASSERT_NOT_NULL(fp);
-    fputs(content, fp);
-    fclose(fp);
+    if (fp == NULL) {
+        TEST_FAIL_MESSAGE("fopen failed");
+        return;
+    }
+
+    int write_rc = fputs(content, fp);
+    int close_rc = fclose(fp);
+    TEST_ASSERT_NOT_EQUAL(EOF, write_rc);
+    TEST_ASSERT_EQUAL_INT(0, close_rc);
 }
 
-static cJSON *require_object(cJSON *parent, const char *key)
+static const cJSON *require_object(const cJSON *parent, const char *key)
 {
-    cJSON *item = cJSON_GetObjectItemCaseSensitive(parent, key);
-    TEST_ASSERT_TRUE(cJSON_IsObject(item));
+    const cJSON *item = cJSON_GetObjectItemCaseSensitive(parent, key);
+    if (!cJSON_IsObject(item)) {
+        TEST_FAIL_MESSAGE("missing JSON object");
+        return NULL;
+    }
     return item;
 }
 
-static double require_number(cJSON *parent, const char *key)
+static double require_number(const cJSON *parent, const char *key)
 {
-    cJSON *item = cJSON_GetObjectItemCaseSensitive(parent, key);
-    TEST_ASSERT_TRUE(cJSON_IsNumber(item));
+    const cJSON *item = cJSON_GetObjectItemCaseSensitive(parent, key);
+    if (!cJSON_IsNumber(item)) {
+        TEST_FAIL_MESSAGE("missing JSON number");
+        return 0.0;
+    }
     return item->valuedouble;
+}
+
+static void assert_reason_contains(const char *reason, const char *needle)
+{
+    if (reason == NULL || needle == NULL) {
+        TEST_FAIL_MESSAGE("missing reason text");
+        return;
+    }
+
+    TEST_ASSERT_NOT_NULL(strstr(reason, needle));
 }
 
 /* ========== CRC16 ========== */
 
 void test_crc16_known_value(void)
 {
-    uint8_t sample_msg[] = {0x01, 0x03, 0x00, 0x00, 0x00, 0x01};
+    const uint8_t sample_msg[] = {0x01, 0x03, 0x00, 0x00, 0x00, 0x01};
     uint16_t result = crc_calculate(sample_msg, 6);
     TEST_ASSERT_EQUAL_HEX16(0xBB53, result);
 }
@@ -84,7 +119,7 @@ void test_ringbuf_basic_ops(void)
     TEST_ASSERT_EQUAL_UINT8(4, read_out[4]);
     TEST_ASSERT_EQUAL_UINT32(4, RingBuf_getreadable(&rb));
 
-    uint8_t data_to_wrap[] = {10, 11, 12, 13};
+    const uint8_t data_to_wrap[] = {10, 11, 12, 13};
     uint32_t write_len = RingBuf_writeblocks(&rb, data_to_wrap, 4);
     TEST_ASSERT_EQUAL_UINT32(4, write_len);
     TEST_ASSERT_EQUAL_UINT32(3, rb.head);
@@ -103,7 +138,10 @@ void test_config_thresholds(void)
 {
     char root_template[] = "/tmp/edge_conf_test_XXXXXX";
     char *root = mkdtemp(root_template);
-    TEST_ASSERT_NOT_NULL(root);
+    if (root == NULL) {
+        TEST_FAIL_MESSAGE("mkdtemp failed");
+        return;
+    }
 
     char conf_path[512];
     make_path(conf_path, sizeof(conf_path), root, "test.conf");
@@ -158,7 +196,10 @@ void test_gateway_pose_snapshot(void)
 {
     char root_template[] = "/tmp/edge_pose_test_XXXXXX";
     char *root = mkdtemp(root_template);
-    TEST_ASSERT_NOT_NULL(root);
+    if (root == NULL) {
+        TEST_FAIL_MESSAGE("mkdtemp failed");
+        return;
+    }
 
     char dev_dir[512];
     make_path(dev_dir, sizeof(dev_dir), root, "iio:device0");
@@ -213,49 +254,54 @@ void test_gateway_pose_check_threshold(void)
         gateway_pose_t pose = {.valid = 1,
                                .accel_x_g = 2.0f, .accel_y_g = 0.0f, .accel_z_g = 1.0f,
                                .tilt_deg = 5.0f};
+        reason = NULL;
         TEST_ASSERT_NOT_EQUAL(0, gateway_pose_check_threshold(&pose, peak, rms, gyro, &reason));
-        TEST_ASSERT_NOT_NULL(reason);
-        TEST_ASSERT_NOT_NULL(strstr(reason, "peak"));
+        assert_reason_contains(reason, "peak");
     }
     /* Y 轴负向峰值超标 */
     {
         gateway_pose_t pose = {.valid = 1,
                                .accel_x_g = 0.0f, .accel_y_g = -2.5f, .accel_z_g = 1.0f,
                                .tilt_deg = 5.0f};
+        reason = NULL;
         TEST_ASSERT_NOT_EQUAL(0, gateway_pose_check_threshold(&pose, peak, rms, gyro, &reason));
-        TEST_ASSERT_NOT_NULL(strstr(reason, "peak"));
+        assert_reason_contains(reason, "peak");
     }
     /* Z 轴峰值超标 */
     {
         gateway_pose_t pose = {.valid = 1,
                                .accel_x_g = 0.0f, .accel_y_g = 0.0f, .accel_z_g = 3.0f,
                                .tilt_deg = 5.0f};
+        reason = NULL;
         TEST_ASSERT_NOT_EQUAL(0, gateway_pose_check_threshold(&pose, peak, rms, gyro, &reason));
-        TEST_ASSERT_NOT_NULL(strstr(reason, "peak"));
+        assert_reason_contains(reason, "peak");
     }
     /* RMS 超标 */
     {
         gateway_pose_t pose = {.valid = 1,
                                .accel_x_g = 1.4f, .accel_y_g = 1.4f, .accel_z_g = 1.4f,
                                .tilt_deg = 5.0f};
+        reason = NULL;
         TEST_ASSERT_NOT_EQUAL(0, gateway_pose_check_threshold(&pose, peak, rms, gyro, &reason));
-        TEST_ASSERT_NOT_NULL(strstr(reason, "rms"));
+        assert_reason_contains(reason, "rms");
     }
     /* 倾斜超标 */
     {
         gateway_pose_t pose = {.valid = 1,
                                .accel_x_g = 0.0f, .accel_y_g = 0.0f, .accel_z_g = 0.7f,
                                .tilt_deg = 45.0f};
+        reason = NULL;
         TEST_ASSERT_NOT_EQUAL(0, gateway_pose_check_threshold(&pose, peak, rms, gyro, &reason));
-        TEST_ASSERT_NOT_NULL(strstr(reason, "gyro"));
+        assert_reason_contains(reason, "gyro");
     }
     /* 负向倾斜超标 */
     {
         gateway_pose_t pose = {.valid = 1,
                                .accel_x_g = 0.0f, .accel_y_g = 0.0f, .accel_z_g = 0.7f,
                                .tilt_deg = -60.0f};
+        reason = NULL;
         TEST_ASSERT_NOT_EQUAL(0, gateway_pose_check_threshold(&pose, peak, rms, gyro, &reason));
-        TEST_ASSERT_NOT_NULL(strstr(reason, "gyro"));
+        assert_reason_contains(reason, "gyro");
     }
     /* invalid pose */
     {
@@ -305,23 +351,30 @@ void test_alarm_pose_json(void)
     TEST_ASSERT_EQUAL_INT(0, protocol_encode_alarm_pose("edge-pi-01", 1, &pose, json, sizeof(json)));
 
     cJSON *root = cJSON_Parse(json);
-    TEST_ASSERT_NOT_NULL(root);
+    if (root == NULL) {
+        TEST_FAIL_MESSAGE("cJSON_Parse failed");
+        return;
+    }
 
-    cJSON *device_id = cJSON_GetObjectItemCaseSensitive(root, "device_id");
-    TEST_ASSERT_TRUE(cJSON_IsString(device_id));
+    const cJSON *device_id = cJSON_GetObjectItemCaseSensitive(root, "device_id");
+    if (!cJSON_IsString(device_id)) {
+        cJSON_Delete(root);
+        TEST_FAIL_MESSAGE("missing device_id");
+        return;
+    }
     TEST_ASSERT_EQUAL_STRING("edge-pi-01", device_id->valuestring);
     TEST_ASSERT_EQUAL_INT(1, (int)require_number(root, "alarm"));
     TEST_ASSERT_EQUAL_UINT32(123456, (uint32_t)require_number(root, "timestamp"));
 
-    cJSON *gateway_pose = require_object(root, "gateway_pose");
+    const cJSON *gateway_pose = require_object(root, "gateway_pose");
     TEST_ASSERT_EQUAL_INT(1, (int)require_number(gateway_pose, "valid"));
 
-    cJSON *accel_raw = require_object(gateway_pose, "accel_raw");
+    const cJSON *accel_raw = require_object(gateway_pose, "accel_raw");
     TEST_ASSERT_EQUAL_INT(1, (int)require_number(accel_raw, "x"));
     TEST_ASSERT_EQUAL_INT(-2, (int)require_number(accel_raw, "y"));
     TEST_ASSERT_EQUAL_INT(3, (int)require_number(accel_raw, "z"));
 
-    cJSON *accel_g = require_object(gateway_pose, "accel_g");
+    const cJSON *accel_g = require_object(gateway_pose, "accel_g");
     TEST_ASSERT_FLOAT_WITHIN(0.0001f, 0.1f, (float)require_number(accel_g, "x"));
     TEST_ASSERT_FLOAT_WITHIN(0.0001f, -0.2f, (float)require_number(accel_g, "y"));
     TEST_ASSERT_FLOAT_WITHIN(0.0001f, 0.9f, (float)require_number(accel_g, "z"));

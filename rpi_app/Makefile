@@ -22,9 +22,11 @@ SRCS = $(wildcard $(SRC_DIR)/*.c)
 APP_MAIN_SRC = $(SRC_DIR)/main.c
 # 3. 提取出所有的“库逻辑”文件（即排除掉 main.c 的剩余文件）
 LIB_SRCS = $(filter-out $(APP_MAIN_SRC), $(SRCS))
-EXTERNAL_SRCS = $(wildcard $(EXTERNAL_DIR)/*.c)
+APP_EXTERNAL_SRCS = $(EXTERNAL_DIR)/cJSON.c
+TEST_EXTERNAL_SRCS = $(wildcard $(EXTERNAL_DIR)/*.c)
 LIB_OBJS = $(patsubst $(SRC_DIR)/%.c, $(BUILD_DIR)/%.o, $(LIB_SRCS))
-EXTERNAL_OBJS = $(patsubst $(EXTERNAL_DIR)/%.c, $(BUILD_DIR)/%.o, $(EXTERNAL_SRCS))
+APP_EXTERNAL_OBJS = $(patsubst $(EXTERNAL_DIR)/%.c, $(BUILD_DIR)/%.o, $(APP_EXTERNAL_SRCS))
+TEST_EXTERNAL_OBJS = $(patsubst $(EXTERNAL_DIR)/%.c, $(BUILD_DIR)/%.o, $(TEST_EXTERNAL_SRCS))
 
 # 4. 获取测试文件
 TEST_SRCS = $(wildcard $(TEST_DIR)/*.c)
@@ -35,7 +37,7 @@ TEST_OBJS = $(patsubst $(TEST_DIR)/%.c, $(BUILD_DIR)/%.o, $(TEST_SRCS))
 all: $(BUILD_DIR) $(TARGET)
 
 # 生成应用主程序：链接 库逻辑 + 外部库 + 应用主入口
-$(TARGET): $(LIB_OBJS) $(EXTERNAL_OBJS) $(patsubst $(SRC_DIR)/%.c, $(BUILD_DIR)/%.o, $(APP_MAIN_SRC))
+$(TARGET): $(LIB_OBJS) $(APP_EXTERNAL_OBJS) $(patsubst $(SRC_DIR)/%.c, $(BUILD_DIR)/%.o, $(APP_MAIN_SRC))
 	$(CC) $^ -o $(TARGET) $(LIBS)
 	@echo "Build app success!"
 
@@ -44,7 +46,7 @@ test: $(BUILD_DIR) $(TEST_TARGET)
 	@echo "Running tests..."
 	./$(TEST_TARGET)
 
-$(TEST_TARGET): $(LIB_OBJS) $(EXTERNAL_OBJS) $(TEST_OBJS)
+$(TEST_TARGET): $(LIB_OBJS) $(TEST_EXTERNAL_OBJS) $(TEST_OBJS)
 	$(CC) $^ -o $(TEST_TARGET) $(LIBS)
 	@echo "Build test success!"
 
@@ -65,8 +67,19 @@ $(BUILD_DIR)/%.o: $(TEST_DIR)/%.c
 	$(CC) $(CFLAGS) -c $< -o $@
 
 # 只编译不链接，用于 CI 交叉编译检查（无需安装 ARM 版 libsqlite3）
-compile-check: $(BUILD_DIR) $(LIB_OBJS) $(EXTERNAL_OBJS) $(patsubst $(SRC_DIR)/%.c, $(BUILD_DIR)/%.o, $(APP_MAIN_SRC))
+compile-check: $(BUILD_DIR) $(LIB_OBJS) $(APP_EXTERNAL_OBJS) $(patsubst $(SRC_DIR)/%.c, $(BUILD_DIR)/%.o, $(APP_MAIN_SRC))
 	@echo "All objects compiled for architecture check"
+
+# 静态分析，和 CI 使用同一套参数
+cppcheck:
+	cppcheck --enable=warning,style,performance \
+	         --error-exitcode=1 \
+	         --suppress=missingIncludeSystem \
+	         --suppress=toomanyconfigs \
+	         --suppress=normalCheckLevelMaxBranches \
+	         -URUN_TEST \
+	         -Iinclude -Iexternal \
+	         src/ tests/
 
 # 运行测试并生成 JUnit XML 报告
 test-xml: $(BUILD_DIR) $(TEST_TARGET)
@@ -101,4 +114,4 @@ test-xml: $(BUILD_DIR) $(TEST_TARGET)
 clean:
 	rm -rf $(BUILD_DIR)
 
-.PHONY: all clean test test-xml compile-check
+.PHONY: all clean test test-xml compile-check cppcheck

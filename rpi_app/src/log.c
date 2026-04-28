@@ -25,8 +25,8 @@ void edge_log(Loglevel_t level, const char* format, ...)
     time(&rawtime);
     localtime_r(&rawtime, &info);
     
-    char* level_str = NULL;
-    char* color_code = NULL;
+    const char* level_str = NULL;
+    const char* color_code = NULL;
     switch (level) 
     {
         case LOG_INFO:

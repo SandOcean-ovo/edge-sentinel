@@ -18,7 +18,7 @@ static int find_iio_device_dir(const char *iio_root, char *out, size_t out_size)
     if (!dir)
         return -1;
 
-    struct dirent *ent;
+    const struct dirent *ent;
     while ((ent = readdir(dir)) != NULL)
     {
         if (strncmp(ent->d_name, "iio:device", 10) != 0)
