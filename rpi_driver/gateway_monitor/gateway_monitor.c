@@ -9,12 +9,7 @@
 #include <linux/uaccess.h>
 #include <linux/delay.h>
 
-/* ioctl 命令码 —— 与 userspace 头文件 gateway_monitor_ioctl.h 保持同步
- * 阈值单位：milli-g (s32)，例如 1500 表示 1.5g */
-#define GATEWAY_MONITOR_IOC_MAGIC 'G'
-#define GATEWAY_MONITOR_IOC_SET_PEAK_THR _IOW(GATEWAY_MONITOR_IOC_MAGIC, 1, s32)
-#define GATEWAY_MONITOR_IOC_SET_RMS_THR _IOW(GATEWAY_MONITOR_IOC_MAGIC, 2, s32)
-#define GATEWAY_MONITOR_IOC_SET_GYRO_THR _IOW(GATEWAY_MONITOR_IOC_MAGIC, 3, s32)
+#include <gateway_monitor_ioctl.h>
 
 #define MPU6050_ACCEL_CHAN(_axis, _addr) {        \
     .type = IIO_ACCEL,                            \
@@ -54,36 +49,58 @@ static struct i2c_client *global_client;
 static long gateway_monitor_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 {
     struct mpu6050_data *data = filp->private_data;
+    s32 __user *user_arg = (s32 __user *)arg;
     s32 val;
 
     switch (cmd)
     {
     case GATEWAY_MONITOR_IOC_SET_PEAK_THR:
-        if (copy_from_user(&val, (s32 __user *)arg, sizeof(val)))
+        if (copy_from_user(&val, user_arg, sizeof(val)))
             return -EFAULT;
         mutex_lock(&data->thr_lock);
         data->accel_peak_thr = val;
         mutex_unlock(&data->thr_lock);
-        pr_info("gateway_monitor: peak threshold set to %d.%03d g\n",
-                val / 1000, abs(val) % 1000);
+        pr_info_ratelimited("gateway_monitor: peak threshold set to %d.%03d g\n",
+                            val / 1000, abs(val) % 1000);
         break;
     case GATEWAY_MONITOR_IOC_SET_RMS_THR:
-        if (copy_from_user(&val, (s32 __user *)arg, sizeof(val)))
+        if (copy_from_user(&val, user_arg, sizeof(val)))
             return -EFAULT;
         mutex_lock(&data->thr_lock);
         data->accel_rms_thr = val;
         mutex_unlock(&data->thr_lock);
-        pr_info("gateway_monitor: rms threshold set to %d.%03d g\n",
-                val / 1000, abs(val) % 1000);
+        pr_info_ratelimited("gateway_monitor: rms threshold set to %d.%03d g\n",
+                            val / 1000, abs(val) % 1000);
         break;
     case GATEWAY_MONITOR_IOC_SET_GYRO_THR:
-        if (copy_from_user(&val, (s32 __user *)arg, sizeof(val)))
+        if (copy_from_user(&val, user_arg, sizeof(val)))
             return -EFAULT;
         mutex_lock(&data->thr_lock);
         data->gyro_thr = val;
         mutex_unlock(&data->thr_lock);
-        pr_info("gateway_monitor: gyro threshold set to %d.%d deg/s\n",
-                val / 1000, abs(val) % 1000);
+        pr_info_ratelimited("gateway_monitor: gyro threshold set to %d.%d deg/s\n",
+                            val / 1000, abs(val) % 1000);
+        break;
+    case GATEWAY_MONITOR_IOC_GET_PEAK_THR:
+        mutex_lock(&data->thr_lock);
+        val = data->accel_peak_thr;
+        mutex_unlock(&data->thr_lock);
+        if (copy_to_user(user_arg, &val, sizeof(val)))
+            return -EFAULT;
+        break;
+    case GATEWAY_MONITOR_IOC_GET_RMS_THR:
+        mutex_lock(&data->thr_lock);
+        val = data->accel_rms_thr;
+        mutex_unlock(&data->thr_lock);
+        if (copy_to_user(user_arg, &val, sizeof(val)))
+            return -EFAULT;
+        break;
+    case GATEWAY_MONITOR_IOC_GET_GYRO_THR:
+        mutex_lock(&data->thr_lock);
+        val = data->gyro_thr;
+        mutex_unlock(&data->thr_lock);
+        if (copy_to_user(user_arg, &val, sizeof(val)))
+            return -EFAULT;
         break;
     default:
         return -ENOTTY;

@@ -1,0 +1,13 @@
+lockdep_ready: 1
+threads: 1
+loops_per_thread: 1
+cpu_list: 0-3
+read_every: 0
+stress_exit: 1
+ioctl_errors: unknown
+verify_errors: unknown
+iio_errors: unknown
+dmesg_suspect_lines: 0
+stress_log: /home/sandocean/edge-sentinel/docs/test_reports/lockdep_20260511_164004/ioctl_stress.log
+dmesg_delta: /home/sandocean/edge-sentinel/docs/test_reports/lockdep_20260511_164004/dmesg_delta.log
+dmesg_suspect: /home/sandocean/edge-sentinel/docs/test_reports/lockdep_20260511_164004/dmesg_suspect.log

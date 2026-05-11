@@ -1,0 +1,3 @@
+kernel: Linux sandocean 6.18.28-v8-16k-lockdep+ #1 SMP PREEMPT Mon May 11 15:34:23 CST 2026 aarch64 GNU/Linux
+config: unavailable
+note: using /proc/lockdep presence as runtime lockdep evidence

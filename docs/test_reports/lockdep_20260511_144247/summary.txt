@@ -1,0 +1,4 @@
+lockdep_ready: 0
+result: skipped
+reason: CONFIG_PROVE_LOCKING and CONFIG_DEBUG_LOCK_ALLOC are not enabled
+next_step: boot a kernel with CONFIG_PROVE_LOCKING=y and rerun this script

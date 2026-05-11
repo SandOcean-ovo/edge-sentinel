@@ -1,3 +1,5 @@
+ccflags-y += -I$(src)/../../rpi_app/include
+
 # 定义你要生成的模块名（注意：这里的 .o 最终会被内核构建系统转化为 .ko）
 obj-m += gateway_monitor.o
 
