@@ -11,7 +11,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 DRIVER_DIR="$PROJECT_DIR/rpi_driver"
-LOG_FILE="/tmp/edge_driver_test.log"
+LOG_FILE="$(mktemp "${TMPDIR:-/tmp}/edge_driver_test.XXXXXX.log")"
 PASS=0
 FAIL=0
 
@@ -29,6 +29,23 @@ check_cmd() {
     command -v "$1" >/dev/null 2>&1 || { log_fail "Missing command: $1"; exit 1; }
 }
 
+get_platform_model() {
+    if [[ -r /proc/device-tree/model ]]; then
+        tr -d '\0' < /proc/device-tree/model
+        return
+    fi
+
+    awk -F: '/^Model[[:space:]]*:/ { sub(/^[[:space:]]*/, "", $2); print $2; exit }' /proc/cpuinfo 2>/dev/null || true
+}
+
+is_raspberry_pi() {
+    if [[ -r /proc/device-tree/model ]] && tr -d '\0' < /proc/device-tree/model | grep -qi "raspberry pi"; then
+        return 0
+    fi
+
+    grep -qiE "raspberry pi|bcm[0-9]" /proc/cpuinfo 2>/dev/null
+}
+
 cleanup() {
     log_section "清理"
     # 按逆序卸载模块
@@ -36,11 +53,12 @@ cleanup() {
     rmmod edge_alarm      2>/dev/null && log_info "rmmod edge_alarm"      || true
 
     # 删除设备节点（如果模块未通过 class_create 自动管理）
-    rm -f /dev/edge_alarm /dev/gateway_monitor 2>/dev/null || true
+    rm -f /dev/edge_alarm 2>/dev/null || true
 }
 
 # ─── 0. 环境检查 ───────────────────────────────────────────────
 log_section "环境检查"
+log_info "日志文件: $LOG_FILE"
 check_cmd make
 check_cmd gcc
 
@@ -83,11 +101,13 @@ if [[ "$(id -u)" -ne 0 ]]; then
     exit 1
 fi
 
-if ! grep -q "BCM\|bcm\|raspberry" /proc/cpuinfo 2>/dev/null; then
-    log_info "非树莓派平台 — 跳过 insmod/rmmod 步骤"
-    QUICK_MODE=1
-else
+PLATFORM_MODEL="$(get_platform_model)"
+if is_raspberry_pi; then
+    log_info "检测到树莓派平台: ${PLATFORM_MODEL:-unknown}"
     QUICK_MODE=0
+else
+    log_info "非树莓派平台 (${PLATFORM_MODEL:-unknown}) — 跳过 insmod/rmmod 步骤"
+    QUICK_MODE=1
 fi
 
 if [[ "$QUICK_MODE" -eq 1 ]]; then
@@ -134,6 +154,16 @@ if [[ -c /dev/gateway_monitor ]]; then
     log_pass "/dev/gateway_monitor 存在"
 else
     log_fail "/dev/gateway_monitor 不存在"
+
+    if [[ -e /sys/bus/i2c/devices/1-0068/driver ]]; then
+        GATEWAY_MONITOR_BOUND_DRIVER="$(basename "$(readlink -f /sys/bus/i2c/devices/1-0068/driver)")"
+        log_info "I2C 设备 1-0068 当前绑定驱动: $GATEWAY_MONITOR_BOUND_DRIVER"
+        if [[ "$GATEWAY_MONITOR_BOUND_DRIVER" == "inv-mpu6050-i2c" ]]; then
+            log_info "官方 inv-mpu6050-i2c 抢占了 MPU6050，gateway_monitor 的 probe 不会执行"
+        fi
+    else
+        log_info "未发现 /sys/bus/i2c/devices/1-0068/driver 绑定信息"
+    fi
 fi
 
 # ─── 6. 测试 edge_alarm ─────────────────────────────────────────
@@ -189,7 +219,7 @@ log_section "内核日志检查"
 DMESG_OUT="$PROJECT_DIR/dmesg_after_test.log"
 dmesg > "$DMESG_OUT"
 
-ERROR_COUNT=$(grep -ci "error\|oops\|bug\|warning" "$DMESG_OUT" 2>/dev/null || echo "0")
+ERROR_COUNT=$(grep -Eci "error|oops|bug|warning" "$DMESG_OUT" 2>/dev/null || true)
 log_info "dmesg 输出已保存至: $DMESG_OUT"
 log_info "相关内核消息:"
 grep -i "edge_alarm\|gateway_monitor\|mpu6050\|edge_mcu" "$DMESG_OUT" 2>/dev/null | head -20 | while read -r line; do

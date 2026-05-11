@@ -7,6 +7,8 @@
 #include <linux/cdev.h>
 #include <linux/device.h>
 #include <linux/uaccess.h>
+#include <linux/workqueue.h>
+#include <linux/ktime.h>
 
 static const struct of_device_id mcu_of_match[] = {
     {.compatible = "edge_sentinel,mcu"},
@@ -21,6 +23,9 @@ typedef struct edge_alarm_dev
     int irq_num;
     wait_queue_head_t wait_queue;
     int alarm_flag;
+    struct work_struct alarm_work;
+    u64 irq_timestamp_ns;
+    u64 alarm_timestamp_ns;
 } edge_alarm_dev;
 
 MODULE_DEVICE_TABLE(of, mcu_of_match);
@@ -30,15 +35,30 @@ irqreturn_t mcu_alarm_irq_handler(int irq, void *dev_id);
 irqreturn_t mcu_alarm_irq_handler(int irq, void *dev_id)
 {
     struct edge_alarm_dev *my_dev = (struct edge_alarm_dev *)dev_id;
-    
-    my_dev->alarm_flag = 1;
 
-    wake_up_interruptible(&my_dev->wait_queue);
+    WRITE_ONCE(my_dev->irq_timestamp_ns, ktime_get_ns());
+    schedule_work(&my_dev->alarm_work);
 
     return IRQ_HANDLED;
 }
 
 EXPORT_SYMBOL(mcu_alarm_irq_handler);
+
+static void mcu_alarm_work_handler(struct work_struct *work)
+{
+    struct edge_alarm_dev *my_dev = container_of(work, struct edge_alarm_dev, alarm_work);
+
+    WRITE_ONCE(my_dev->alarm_timestamp_ns, READ_ONCE(my_dev->irq_timestamp_ns));
+    WRITE_ONCE(my_dev->alarm_flag, 1);
+    wake_up_interruptible(&my_dev->wait_queue);
+}
+
+static void mcu_alarm_cancel_work(void *data)
+{
+    struct edge_alarm_dev *my_dev = data;
+
+    cancel_work_sync(&my_dev->alarm_work);
+}
 
 static int mcu_alarm_open(struct inode *inode, struct file *file)
 {
@@ -60,17 +80,17 @@ static ssize_t mcu_alarm_read(struct file *filp, char __user *buf, size_t count,
 {
     edge_alarm_dev *my_dev = filp->private_data;
     /* 等待中断触发 */
-    if (my_dev->alarm_flag == 0)
+    if (READ_ONCE(my_dev->alarm_flag) == 0)
     {
         /* 非阻塞模式 直接返回 */
         if (filp->f_flags & O_NONBLOCK)
             return -EAGAIN;
 
         /* 阻塞模式 阻塞等待中断触发 */
-        if (wait_event_interruptible(my_dev->wait_queue, my_dev->alarm_flag))
+        if (wait_event_interruptible(my_dev->wait_queue, READ_ONCE(my_dev->alarm_flag)))
             return -ERESTARTSYS;
     }
-    my_dev->alarm_flag = 0;
+    WRITE_ONCE(my_dev->alarm_flag, 0);
 
     char str[] = "ALARM TRIGGERED!\n";
 
@@ -91,7 +111,7 @@ static __poll_t mcu_alarm_poll(struct file *filp, struct poll_table_struct *wait
     __poll_t mask = 0;
     poll_wait(filp, &my_dev->wait_queue, wait);
 
-    if (my_dev->alarm_flag == 1)
+    if (READ_ONCE(my_dev->alarm_flag) == 1)
     {
         mask |= (EPOLLIN | EPOLLRDNORM);
     }
@@ -117,6 +137,10 @@ static int mcu_alarm_probe(struct platform_device *pdev)
         return -ENOMEM;
 
     init_waitqueue_head(&my_dev->wait_queue);
+    INIT_WORK(&my_dev->alarm_work, mcu_alarm_work_handler);
+    ret = devm_add_action_or_reset(&pdev->dev, mcu_alarm_cancel_work, my_dev);
+    if (ret)
+        return ret;
 
     // 为了让 remove 能够回收 my_dev
     platform_set_drvdata(pdev, my_dev);
@@ -190,6 +214,8 @@ static void mcu_alarm_remove(struct platform_device *pdev)
     // 从 pdev 中取回私有数据
     edge_alarm_dev *my_dev = platform_get_drvdata(pdev);
 
+    // devm_free_irq(&pdev->dev, my_dev->irq_num, my_dev);
+    cancel_work_sync(&my_dev->alarm_work);
     device_destroy(my_dev->alarm_class, my_dev->dev_num);
     class_destroy(my_dev->alarm_class);
     cdev_del(&my_dev->alarm_cdev);

@@ -1,8 +1,17 @@
-#!/bin/sh
+#!/bin/bash
+
+if [ $# -lt 2 ]; then
+    echo "Usage: $0 <PID> <IRQ>"
+    echo "  PID   edge_gatewayd process ID"
+    echo "  IRQ   edge_alarm interrupt number"
+    exit 1
+fi
+
+PID=$1
+IRQ=$2
 
 TRACE=/sys/kernel/debug/tracing
-PID=134131    # 你的进程PID
-IRQ=186       # 你要抓的中断号
+SAVE_DIR="$(pwd)"
 
 cd $TRACE || exit 1
 
@@ -26,19 +35,37 @@ echo 1 > events/sched/sched_waking/enable
 echo 1 > events/sched/sched_wakeup/enable
 echo 1 > events/sched/sched_switch/enable
 
-# 只捕获 IRQ 186
+# 只捕获目标 IRQ
 echo "irq == $IRQ" > events/irq/irq_handler_entry/filter
 echo "irq == $IRQ" > events/irq/irq_handler_exit/filter
 
-# 只捕获你的进程
+# 只捕获目标进程
 echo "pid == $PID" > events/sched/sched_waking/filter
 echo "pid == $PID" > events/sched/sched_wakeup/filter
 echo "next_pid == $PID || prev_pid == $PID" > events/sched/sched_switch/filter
 
+# 时钟源：global 保证跨 CPU 单调一致
+echo global > trace_clock
+
 # 缓冲区大小
 echo 4096 > buffer_size_kb
 
+# ---------- SIGINT / SIGTERM 处理 ----------
+cleanup() {
+    echo ""
+    echo 0 > $TRACE/tracing_on
+    echo "Saving trace to $SAVE_DIR/trace.txt ..."
+    cat $TRACE/trace > "$SAVE_DIR/trace.txt"
+    echo "Done."
+    exit 0
+}
+trap cleanup INT TERM
+
 # 开始追踪
 echo 1 > tracing_on
+echo "Tracing started! PID=$PID, IRQ=$IRQ"
+echo "Press Ctrl+C to stop and save trace to trace.txt"
 
-echo "✅ 追踪已启动！PID=$PID, IRQ=$IRQ"
+# 挂起等待信号
+sleep infinity &
+wait

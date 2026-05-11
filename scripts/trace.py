@@ -1,17 +1,20 @@
 #!/usr/bin/env python3
+import argparse
 import re
 import sys
 import statistics
 
-IRQ = 186
 COMM = "edge_gatewayd"
-PID = 134131
 
-if len(sys.argv) < 2:
-    print(f"Usage: {sys.argv[0]} trace.txt")
-    sys.exit(1)
+parser = argparse.ArgumentParser(description="Analyze ftrace latency from trace.txt")
+parser.add_argument("trace_file", help="Path to the ftrace output file")
+parser.add_argument("--pid", type=int, required=True, help="PID of edge_gatewayd")
+parser.add_argument("--irq", type=int, required=True, help="IRQ number for edge_alarm")
+args = parser.parse_args()
 
-trace_file = sys.argv[1]
+PID = args.pid
+IRQ = args.irq
+trace_file = args.trace_file
 
 ts_re = r"\s+(\d+\.\d+):"
 
@@ -133,9 +136,11 @@ print("\nFirst 10 complete samples:")
 for i, s in enumerate(samples[:10]):
     e2e = to_us(s["irq_entry"], s["user_return"])
     sw = to_us(s["irq_entry"], s["sched_switch"])
+    sw_str = f"{sw:.3f} us" if sw is not None else "N/A"
+    e2e_str = f"{e2e:.3f} us" if e2e is not None else "N/A"
     print(
         f"  #{i}: "
         f"irq={s['irq_entry']:.6f}, "
-        f"switch_delta={sw:.3f} us, "
-        f"e2e={e2e:.3f} us"
+        f"switch_delta={sw_str}, "
+        f"e2e={e2e_str}"
     )

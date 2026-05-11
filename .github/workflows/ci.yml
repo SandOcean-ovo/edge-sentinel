@@ -70,12 +70,7 @@ jobs:
 
       - name: cppcheck rpi_app source
         working-directory: rpi_app
-        run: |
-          cppcheck --enable=warning,style,performance \
-                   --error-exitcode=1 \
-                   --suppress=missingIncludeSystem \
-                   -Iinclude -Iexternal \
-                   src/ tests/
+        run: make cppcheck
 
       - name: cppcheck STM32 firmware
         run: |
